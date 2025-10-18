@@ -13,7 +13,8 @@ struct LightSet {
 // TODO-2: you may want to create a ClusterSet struct similar to LightSet
 
 struct CameraUniforms {
-    view_proj_mat: mat4x4f
+    view_proj_mat: mat4x4f,
+    inv_proj_mat: mat4x4f
     // TODO-1.3: add an entry for the view proj mat (of type mat4x4f)
 }
 
