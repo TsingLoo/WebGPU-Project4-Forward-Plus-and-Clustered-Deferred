@@ -5,11 +5,6 @@ import { Stage } from '../stage/stage';
 export class ForwardPlusRenderer extends renderer.Renderer {
     // TODO-2: add layouts, pipelines, textures, etc. needed for Forward+ here
     // you may need extra uniforms such as the camera view matrix and the canvas resolution
-
-    sceneUniformsBindGroupLayout: GPUBindGroupLayout;
-    sceneUniformsBindGroup: GPUBindGroup;
-
-
     depthTexture: GPUTexture;
     depthTextureView: GPUTextureView;
 
@@ -18,47 +13,19 @@ export class ForwardPlusRenderer extends renderer.Renderer {
     globalLightIndicesDeviceBuffer: GPUBuffer;
     zeroDeviceBuffer: GPUBuffer;
 
-    pipeline: GPURenderPipeline;
+    zPrepassPipeline: GPURenderPipeline;
+
+    cullingBindGroupLayout: GPUBindGroupLayout;
+    cullingBindGroup: GPUBindGroup;
+    cullingPipeline: GPUComputePipeline;
+
+    shadingBindGroupLayout: GPUBindGroupLayout; 
+    shadingBindGroup: GPUBindGroup;
+    shadingPipeline: GPURenderPipeline;
 
     constructor(stage: Stage) {
         super(stage);
         // TODO-2: initialize layouts, pipelines, textures, etc. needed for Forward+ here
-    
-        this.sceneUniformsBindGroupLayout = renderer.device.createBindGroupLayout({
-            label: "scene uniforms bind group layout",
-            entries: [
-                // TODO-1.2: add an entry for camera uniforms at binding 0, visible to only the vertex shader, and of type "uniform"
-                {
-                    binding: 0,
-                    visibility: GPUShaderStage.VERTEX,
-                    buffer: { type: "uniform" }
-                },
-                { // lightSet
-                    binding: 1,
-                    visibility: GPUShaderStage.FRAGMENT,
-                    buffer: { type: "read-only-storage" }
-                }
-            ]
-        });
-
-        this.sceneUniformsBindGroup = renderer.device.createBindGroup({
-            label: "scene uniforms bind group",
-            layout: this.sceneUniformsBindGroupLayout,
-            entries: [
-                // TODO-1.2: add an entry for camera uniforms at binding 0
-                {
-                    binding: 0,
-                    resource: { buffer: this.camera.uniformsBuffer }
-                },
-                // you can access the camera using `this.camera`
-                // if you run into TypeScript errors, you're probably trying to upload the host buffer instead
-                {
-                    binding: 1,
-                    resource: { buffer: this.lights.lightSetStorageBuffer }
-                }
-            ]
-        });
-
         this.depthTexture = renderer.device.createTexture({
             size: [renderer.canvas.width, renderer.canvas.height],
             format: "depth24plus",
@@ -83,18 +50,43 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         const maxIndices = shaders.constants.totalTilesCount * averageLightsPerTile;
 
         this.globalLightIndicesDeviceBuffer = renderer.device.createBuffer({
-            size: 4 + averageLightsPerTile * 4, // one counter and maxLights indices
+            size: 4 + maxIndices * 4, // one counter and maxLights indices
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
             label: "global light indices buffer"
         })
 
-        this.pipeline = renderer.device.createRenderPipeline({
+        this.shadingBindGroupLayout = renderer.device.createBindGroupLayout({
+            label: "shading bind group layout",
+            entries: [
+                { // Camera Uniforms
+                    binding: 0,
+                    visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                    buffer: { type: "uniform" }
+                },
+                {
+                    binding: 1,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    buffer: { type: "read-only-storage" }
+                },
+                {
+                    binding: 2,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    buffer: { type: "read-only-storage" } 
+                },
+                {
+                    binding: 3,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    buffer: { type: "read-only-storage" } 
+                }
+            ]
+        });
+
+        this.zPrepassPipeline = renderer.device.createRenderPipeline({
+            label: "Z-Prepass pipeline",
             layout: renderer.device.createPipelineLayout({
-                label: "naive pipeline layout",
                 bindGroupLayouts: [
-                    this.sceneUniformsBindGroupLayout,
+                    this.shadingBindGroupLayout,
                     renderer.modelBindGroupLayout,
-                    renderer.materialBindGroupLayout
                 ]
             }),
             depthStencil: {
@@ -104,21 +96,100 @@ export class ForwardPlusRenderer extends renderer.Renderer {
             },
             vertex: {
                 module: renderer.device.createShaderModule({
-                    label: "naive vert shader",
                     code: shaders.naiveVertSrc
                 }),
                 buffers: [ renderer.vertexBufferLayout ]
             },
+        });
+
+
+        this.cullingBindGroupLayout = renderer.device.createBindGroupLayout({
+        label: "culling bind group layout",
+        entries: [
+                {
+                    //Camera uniforms
+                    binding: 0,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: { type: "uniform" }
+                },
+                {
+                    //Light set
+                    binding: 1,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: { type: "read-only-storage" }
+                },
+                {
+                    //Tile offsets
+                    binding: 2,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: { type: "storage" } 
+                },
+                {
+                    //Global light indices
+                    binding: 3,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: { type: "storage" } 
+                }
+            ]
+        })
+
+        this.cullingBindGroup = renderer.device.createBindGroup({
+            label: "culling bind group",
+            layout: this.cullingBindGroupLayout,
+            entries: [
+                { binding: 0, resource: { buffer: this.camera.uniformsBuffer }},
+                { binding: 1, resource: { buffer: this.lights.lightSetStorageBuffer }},
+                { binding: 2, resource: { buffer: this.tileOffsetsDeviceBuffer }},
+                { binding: 3, resource: { buffer: this.globalLightIndicesDeviceBuffer }}
+            ]
+        });
+
+        this.cullingPipeline = renderer.device.createComputePipeline({
+            label: "culling compute pipeline",
+            layout: renderer.device.createPipelineLayout({
+                bindGroupLayouts: [this.cullingBindGroupLayout]
+            }),
+            compute: {
+                module: renderer.device.createShaderModule({
+                    code: shaders.clusteringComputeSrc
+                }),
+                entryPoint: "main" 
+            }
+        });
+
+        this.shadingBindGroup = renderer.device.createBindGroup({
+            label: "shading bind group",
+            layout: this.shadingBindGroupLayout,
+            entries: [
+                { binding: 0, resource: { buffer: this.camera.uniformsBuffer }},
+                { binding: 1, resource: { buffer: this.lights.lightSetStorageBuffer }},
+                { binding: 2, resource: { buffer: this.tileOffsetsDeviceBuffer }},
+                { binding: 3, resource: { buffer: this.globalLightIndicesDeviceBuffer }}
+            ]
+        });
+
+        this.shadingPipeline = renderer.device.createRenderPipeline({
+            layout: renderer.device.createPipelineLayout({
+                bindGroupLayouts: [
+                    this.shadingBindGroupLayout,
+                    renderer.modelBindGroupLayout,
+                    renderer.materialBindGroupLayout
+                ]
+            }),
+            depthStencil: {
+                depthWriteEnabled: false,
+                depthCompare: "equal",
+                format: "depth24plus"
+            },
+            vertex: {
+                module: renderer.device.createShaderModule({ code: shaders.naiveVertSrc }),
+                buffers: [ renderer.vertexBufferLayout ]
+            },
             fragment: {
                 module: renderer.device.createShaderModule({
-                    label: "naive frag shader",
-                    code: shaders.naiveFragSrc,
+                    code: shaders.forwardPlusFragSrc,
                 }),
-                targets: [
-                    {
-                        format: renderer.canvasFormat,
-                    }
-                ]
+                targets: [ { format: renderer.canvasFormat }]
             }
         });
     }
@@ -127,8 +198,48 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         const encoder = renderer.device.createCommandEncoder();
         const canvasTextureView = renderer.context.getCurrentTexture().createView();
 
-        const renderPass = encoder.beginRenderPass({
+        const zPrepass = encoder.beginRenderPass({
             label: "naive render pass",
+            colorAttachments: [],
+            depthStencilAttachment: {
+                view: this.depthTextureView,
+                depthClearValue: 1.0,
+                depthLoadOp: "clear",
+                depthStoreOp: "store"
+            }
+        });
+        zPrepass.setPipeline(this.zPrepassPipeline);
+        zPrepass.setBindGroup(shaders.constants.bindGroup_scene, this.shadingBindGroup);
+        this.scene.iterate(node => {
+            zPrepass.setBindGroup(shaders.constants.bindGroup_model, node.modelBindGroup);
+        }, material => {
+            
+        }, primitive => {
+            zPrepass.setVertexBuffer(0, primitive.vertexBuffer);
+            zPrepass.setIndexBuffer(primitive.indexBuffer, 'uint32');
+            zPrepass.drawIndexed(primitive.numIndices);
+        });
+        zPrepass.end();
+
+        //reset the global light indices counter to zero
+        encoder.copyBufferToBuffer(
+            this.zeroDeviceBuffer, 0,
+            this.globalLightIndicesDeviceBuffer, 0,
+            4
+        );
+
+        const cullingPass = encoder.beginComputePass();
+        cullingPass.setPipeline(this.cullingPipeline);
+        cullingPass.setBindGroup(shaders.constants.bindGroup_scene, this.cullingBindGroup);
+        cullingPass.dispatchWorkgroups(
+            shaders.constants.tilesizeX, 
+            shaders.constants.tilesizeY, 
+            shaders.constants.tilesizeZ
+        );
+        cullingPass.end();
+
+        const shadingPass = encoder.beginRenderPass({
+            label: "Shading Pass",
             colorAttachments: [
                 {
                     view: canvasTextureView,
@@ -139,27 +250,24 @@ export class ForwardPlusRenderer extends renderer.Renderer {
             ],
             depthStencilAttachment: {
                 view: this.depthTextureView,
-                depthClearValue: 1.0,
-                depthLoadOp: "clear",
-                depthStoreOp: "store"
+                depthLoadOp: "load",
+                depthStoreOp: "discard",
+                depthReadOnly: true
             }
         });
-        renderPass.setPipeline(this.pipeline);
-
-        // TODO-1.2: bind `this.sceneUniformsBindGroup` to index `shaders.constants.bindGroup_scene`
-        renderPass.setBindGroup(shaders.constants.bindGroup_scene, this.sceneUniformsBindGroup);
+        shadingPass.setPipeline(this.shadingPipeline);
+        shadingPass.setBindGroup(shaders.constants.bindGroup_scene, this.shadingBindGroup);
 
         this.scene.iterate(node => {
-            renderPass.setBindGroup(shaders.constants.bindGroup_model, node.modelBindGroup);
+            shadingPass.setBindGroup(shaders.constants.bindGroup_model, node.modelBindGroup);
         }, material => {
-            renderPass.setBindGroup(shaders.constants.bindGroup_material, material.materialBindGroup);
+            shadingPass.setBindGroup(shaders.constants.bindGroup_material, material.materialBindGroup);
         }, primitive => {
-            renderPass.setVertexBuffer(0, primitive.vertexBuffer);
-            renderPass.setIndexBuffer(primitive.indexBuffer, 'uint32');
-            renderPass.drawIndexed(primitive.numIndices);
+            shadingPass.setVertexBuffer(0, primitive.vertexBuffer);
+            shadingPass.setIndexBuffer(primitive.indexBuffer, 'uint32');
+            shadingPass.drawIndexed(primitive.numIndices);
         });
-
-        renderPass.end();
+        shadingPass.end();
 
         renderer.device.queue.submit([encoder.finish()]);
     }
