@@ -9,8 +9,14 @@ export class ForwardPlusRenderer extends renderer.Renderer {
     sceneUniformsBindGroupLayout: GPUBindGroupLayout;
     sceneUniformsBindGroup: GPUBindGroup;
 
+
     depthTexture: GPUTexture;
     depthTextureView: GPUTextureView;
+
+    //the index of the first light in each tile and the number of lights in each tile
+    tileOffsetsDeviceBuffer: GPUBuffer;
+    globalLightIndicesDeviceBuffer: GPUBuffer;
+    zeroDeviceBuffer: GPUBuffer;
 
     pipeline: GPURenderPipeline;
 
@@ -59,6 +65,28 @@ export class ForwardPlusRenderer extends renderer.Renderer {
             usage: GPUTextureUsage.RENDER_ATTACHMENT
         });
         this.depthTextureView = this.depthTexture.createView();
+
+        this.tileOffsetsDeviceBuffer = renderer.device.createBuffer({
+            size: shaders.constants.totalTilesCount * 2 * 4, // offset and count per tile
+            usage: GPUBufferUsage.STORAGE,
+        })
+
+        this.zeroDeviceBuffer = renderer.device.createBuffer({
+            size: 4,
+            usage: GPUBufferUsage.COPY_SRC,
+            mappedAtCreation: true
+        });
+        new Uint32Array(this.zeroDeviceBuffer.getMappedRange()).set([0]);
+        this.zeroDeviceBuffer.unmap();
+
+        const averageLightsPerTile = 64; 
+        const maxIndices = shaders.constants.totalTilesCount * averageLightsPerTile;
+
+        this.globalLightIndicesDeviceBuffer = renderer.device.createBuffer({
+            size: 4 + averageLightsPerTile * 4, // one counter and maxLights indices
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+            label: "global light indices buffer"
+        })
 
         this.pipeline = renderer.device.createRenderPipeline({
             layout: renderer.device.createPipelineLayout({

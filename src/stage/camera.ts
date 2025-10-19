@@ -1,9 +1,10 @@
 import { Mat4, mat4, Vec3, vec3 } from "wgpu-matrix";
 import { toRadians } from "../math_util";
 import { device, canvas, fovYDegrees, aspectRatio } from "../renderer";
+import * as shaders from "../shaders/shaders";
 
 class CameraUniforms {
-    readonly buffer = new ArrayBuffer(16 * 4 * 2);
+    readonly buffer = new ArrayBuffer(16 * 4 * 2 + 4 * 4); 
     private readonly floatView = new Float32Array(this.buffer);
 
     set viewProjMat(mat: Float32Array) {
@@ -16,6 +17,13 @@ class CameraUniforms {
     }
 
     // TODO-2: add extra functions to set values needed for light clustering here
+
+    setClusterDimensions(x: number, y: number, z: number) {
+        this.floatView[32] = x;
+        this.floatView[33] = y;
+        this.floatView[34] = z;
+        this.floatView[35] = x * y * z;
+    }
 }
 
 export class Camera {
@@ -141,6 +149,11 @@ export class Camera {
         // TODO-1.1: set `this.uniforms.viewProjMat` to the newly calculated view proj mat
         this.uniforms.viewProjMat = viewProjMat;
         this.uniforms.inverseProjMat = mat4.invert(this.projMat);
+        this.uniforms.setClusterDimensions(
+            shaders.constants.tilesizeX,
+            shaders.constants.tilesizeY,
+            shaders.constants.tilesizeZ
+        );
 
         // TODO-2: write to extra buffers needed for light clustering here
 

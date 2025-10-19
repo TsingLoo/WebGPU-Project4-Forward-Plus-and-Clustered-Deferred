@@ -9,12 +9,19 @@ struct LightSet {
     numLights: u32,
     lights: array<Light>
 }
-
 // TODO-2: you may want to create a ClusterSet struct similar to LightSet
+struct TileMeta {
+    offset: u32, // offset of the first light in the tile
+    count: u32, // number of lights in the tile
+};
 
 struct CameraUniforms {
     view_proj_mat: mat4x4f,
-    inv_proj_mat: mat4x4f
+    inv_proj_mat: mat4x4f,
+    tilesize_x: f32,
+    tilesize_y: f32,    
+    tilesize_z: f32,
+    total_tiles_count: f32,
     // TODO-1.3: add an entry for the view proj mat (of type mat4x4f)
 }
 
