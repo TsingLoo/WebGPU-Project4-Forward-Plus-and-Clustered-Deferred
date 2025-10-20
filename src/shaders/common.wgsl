@@ -15,15 +15,31 @@ struct TileMeta {
     count: u32, // number of lights in the tile
 };
 
+struct LightIndexList {
+    counter: atomic<u32>,
+    indices: array<u32>,
+};
+
 struct CameraUniforms {
     view_proj_mat: mat4x4f,
     inv_proj_mat: mat4x4f,
-    tilesize_x: f32,
-    tilesize_y: f32,    
-    tilesize_z: f32,
-    total_tiles_count: f32,
+
+    view_mat: mat4x4f,
+    proj_mat: mat4x4f,
+
+    near_plane: f32,
+    far_plane: f32,
     // TODO-1.3: add an entry for the view proj mat (of type mat4x4f)
 }
+
+struct ClusterSet {
+    screen_width: u32,
+    screen_height: u32,
+    num_clusters_X: u32,
+    num_clusters_Y: u32,
+    num_clusters_Z: u32
+}
+
 
 // CHECKITOUT: this special attenuation function ensures lights don't affect geometry outside the maximum light radius
 fn rangeAttenuation(distance: f32) -> f32 {
