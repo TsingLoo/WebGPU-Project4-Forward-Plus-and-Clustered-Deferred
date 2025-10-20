@@ -1,5 +1,6 @@
 import * as renderer from '../renderer';
 import * as shaders from '../shaders/shaders';
+import { Camera } from '../stage/camera';
 import { Stage } from '../stage/stage';
 
 export class ForwardPlusRenderer extends renderer.Renderer {
@@ -12,6 +13,8 @@ export class ForwardPlusRenderer extends renderer.Renderer {
     tileOffsetsDeviceBuffer: GPUBuffer;
     globalLightIndicesDeviceBuffer: GPUBuffer;
     zeroDeviceBuffer: GPUBuffer;
+
+    clusterSetDeviceBuffer: GPUBuffer;
 
     zPrepassPipeline: GPURenderPipeline;
 
@@ -45,6 +48,24 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         });
         new Uint32Array(this.zeroDeviceBuffer.getMappedRange()).set([0]);
         this.zeroDeviceBuffer.unmap();
+
+        this.clusterSetDeviceBuffer = renderer.device.createBuffer({
+            size: 4 * 7,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+            mappedAtCreation: true
+        });
+        const mappedRange = this.clusterSetDeviceBuffer.getMappedRange();
+        const floatView = new Float32Array(mappedRange);
+        const uintView = new Uint32Array(mappedRange);
+
+        floatView[0] = renderer.canvas.width;
+        floatView[1] = renderer.canvas.height;
+        floatView[5] = Camera.nearPlane;
+        floatView[6] = Camera.farPlane;
+        uintView[2] = shaders.constants.tilesizeX;
+        uintView[3] = shaders.constants.tilesizeY;
+        uintView[4] = shaders.constants.tilesizeZ;
+        this.clusterSetDeviceBuffer.unmap();
 
         const averageLightsPerTile = 64; 
         const maxIndices = shaders.constants.totalTilesCount * averageLightsPerTile;
@@ -129,6 +150,12 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                     binding: 3,
                     visibility: GPUShaderStage.COMPUTE,
                     buffer: { type: "storage" } 
+                },
+                {
+                    //Cluster set
+                    binding: 4,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: { type: "uniform" }
                 }
             ]
         })
@@ -140,7 +167,8 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                 { binding: 0, resource: { buffer: this.camera.uniformsBuffer }},
                 { binding: 1, resource: { buffer: this.lights.lightSetStorageBuffer }},
                 { binding: 2, resource: { buffer: this.tileOffsetsDeviceBuffer }},
-                { binding: 3, resource: { buffer: this.globalLightIndicesDeviceBuffer }}
+                { binding: 3, resource: { buffer: this.globalLightIndicesDeviceBuffer }},
+                { binding: 4, resource: { buffer: this.clusterSetDeviceBuffer }}
             ]
         });
 
