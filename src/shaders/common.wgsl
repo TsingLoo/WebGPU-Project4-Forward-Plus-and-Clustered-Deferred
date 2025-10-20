@@ -20,6 +20,11 @@ struct LightIndexList {
     indices: array<u32>,
 };
 
+struct LightIndexListReadOnly {
+    counter: u32,
+    indices: array<u32>,
+};
+
 struct CameraUniforms {
     view_proj_mat: mat4x4f,
     inv_proj_mat: mat4x4f,

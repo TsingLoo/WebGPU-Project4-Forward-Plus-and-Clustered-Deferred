@@ -35,15 +35,15 @@ var<workgroup> cluster_aabb_max: vec3f;
 
 @compute @workgroup_size(8, 8, 1) // 保持 B 的工作组大小
 fn main(
-    @builtin(group_id) group_id: vec3<u32>,
+    @builtin(workgroup_id) group_id: vec3<u32>,
     @builtin(local_invocation_index) local_idx: u32,
 ) {
     if (local_idx == 0u) {
         atomicStore(&local_light_count, 0u);
 
         // size of cluster in NDC space
-        let tileNDCX = 2.0 / clusterSet.num_clusters_X;
-        let tileNDCY = 2.0 / clusterSet.num_clusters_Y;
+        let tileNDCX = 2.0 / f32(clusterSet.num_clusters_X);
+        let tileNDCY = 2.0 / f32(clusterSet.num_clusters_Y);
 
         // aabb x y bounds in NDC space
         let xMin = -1.0 + f32(group_id.x) * tileNDCX;
@@ -133,8 +133,8 @@ fn main(
         let final_count = atomicLoad(&local_light_count);
         let count_to_write = min(final_count, MAX_LIGHTS_PER_CLUSTER);
 
-        let cluster_index = group_id.z * (clusterSet.numClustersX * clusterSet.numClustersY) +
-                              group_id.y * clusterSet.numClustersX +
+        let cluster_index = group_id.z * (clusterSet.num_clusters_X * clusterSet.num_clusters_Y) +
+                              group_id.y * clusterSet.num_clusters_X +
                               group_id.x;
 
         let global_offset = atomicAdd(&globalLightIndices.counter, count_to_write);

@@ -50,18 +50,16 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         this.zeroDeviceBuffer.unmap();
 
         this.clusterSetDeviceBuffer = renderer.device.createBuffer({
-            size: 4 * 7,
+            size: 4 * 5,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
             mappedAtCreation: true
         });
         const mappedRange = this.clusterSetDeviceBuffer.getMappedRange();
-        const floatView = new Float32Array(mappedRange);
+        //const floatView = new Float32Array(mappedRange);
         const uintView = new Uint32Array(mappedRange);
 
-        floatView[0] = renderer.canvas.width;
-        floatView[1] = renderer.canvas.height;
-        floatView[5] = Camera.nearPlane;
-        floatView[6] = Camera.farPlane;
+        uintView[0] = renderer.canvas.width;
+        uintView[1] = renderer.canvas.height;
         uintView[2] = shaders.constants.tilesizeX;
         uintView[3] = shaders.constants.tilesizeY;
         uintView[4] = shaders.constants.tilesizeZ;
@@ -84,20 +82,28 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                     visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
                     buffer: { type: "uniform" }
                 },
-                {
+                {   // Light Set
                     binding: 1,
                     visibility: GPUShaderStage.FRAGMENT,
                     buffer: { type: "read-only-storage" }
                 },
                 {
+                    //Tile offsets
                     binding: 2,
                     visibility: GPUShaderStage.FRAGMENT,
                     buffer: { type: "read-only-storage" } 
                 },
                 {
+                    //Global light indices
                     binding: 3,
                     visibility: GPUShaderStage.FRAGMENT,
                     buffer: { type: "read-only-storage" } 
+                },
+                {
+                    //Cluster set
+                    binding: 4,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    buffer: { type: "uniform" }
                 }
             ]
         });
@@ -192,7 +198,8 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                 { binding: 0, resource: { buffer: this.camera.uniformsBuffer }},
                 { binding: 1, resource: { buffer: this.lights.lightSetStorageBuffer }},
                 { binding: 2, resource: { buffer: this.tileOffsetsDeviceBuffer }},
-                { binding: 3, resource: { buffer: this.globalLightIndicesDeviceBuffer }}
+                { binding: 3, resource: { buffer: this.globalLightIndicesDeviceBuffer }},
+                { binding: 4, resource: { buffer: this.clusterSetDeviceBuffer }}
             ]
         });
 
@@ -256,17 +263,17 @@ export class ForwardPlusRenderer extends renderer.Renderer {
             4
         );
 
-        const cullingPass = encoder.beginComputePass();
-        cullingPass.setPipeline(this.cullingPipeline);
-        cullingPass.setBindGroup(shaders.constants.bindGroup_scene, this.cullingBindGroup);
-        cullingPass.dispatchWorkgroups(
+        const cullingComputePass = encoder.beginComputePass();
+        cullingComputePass.setPipeline(this.cullingPipeline);
+        cullingComputePass.setBindGroup(shaders.constants.bindGroup_scene, this.cullingBindGroup);
+        cullingComputePass.dispatchWorkgroups(
             shaders.constants.tilesizeX, 
             shaders.constants.tilesizeY, 
             shaders.constants.tilesizeZ
         );
-        cullingPass.end();
+        cullingComputePass.end();
 
-        const shadingPass = encoder.beginRenderPass({
+        const shadingRenderPass = encoder.beginRenderPass({
             label: "Shading Pass",
             colorAttachments: [
                 {
@@ -278,24 +285,22 @@ export class ForwardPlusRenderer extends renderer.Renderer {
             ],
             depthStencilAttachment: {
                 view: this.depthTextureView,
-                depthLoadOp: "load",
-                depthStoreOp: "discard",
                 depthReadOnly: true
             }
         });
-        shadingPass.setPipeline(this.shadingPipeline);
-        shadingPass.setBindGroup(shaders.constants.bindGroup_scene, this.shadingBindGroup);
+        shadingRenderPass.setPipeline(this.shadingPipeline);
+        shadingRenderPass.setBindGroup(shaders.constants.bindGroup_scene, this.shadingBindGroup);
 
         this.scene.iterate(node => {
-            shadingPass.setBindGroup(shaders.constants.bindGroup_model, node.modelBindGroup);
+            shadingRenderPass.setBindGroup(shaders.constants.bindGroup_model, node.modelBindGroup);
         }, material => {
-            shadingPass.setBindGroup(shaders.constants.bindGroup_material, material.materialBindGroup);
+            shadingRenderPass.setBindGroup(shaders.constants.bindGroup_material, material.materialBindGroup);
         }, primitive => {
-            shadingPass.setVertexBuffer(0, primitive.vertexBuffer);
-            shadingPass.setIndexBuffer(primitive.indexBuffer, 'uint32');
-            shadingPass.drawIndexed(primitive.numIndices);
+            shadingRenderPass.setVertexBuffer(0, primitive.vertexBuffer);
+            shadingRenderPass.setIndexBuffer(primitive.indexBuffer, 'uint32');
+            shadingRenderPass.drawIndexed(primitive.numIndices);
         });
-        shadingPass.end();
+        shadingRenderPass.end();
 
         renderer.device.queue.submit([encoder.finish()]);
     }
