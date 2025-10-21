@@ -42,15 +42,26 @@ fn main(in: FragmentInput) -> @location(0) vec4f
         discard;
     }
 
+    let screen_width = f32(clusterSet.screen_width);
+    let screen_height = f32(clusterSet.screen_height);
+
+    let num_clusters_X = clusterSet.num_clusters_X;
+    let num_clusters_Y = clusterSet.num_clusters_Y;
+    let num_clusters_Z = clusterSet.num_clusters_Z;
+    let num_clusters = num_clusters_X * num_clusters_Y * num_clusters_Z;
+
+    let num_lights = lightSet.numLights;
+
+
     let screen_pos_x = in.fragcoord.x;
     let screen_pos_y = in.fragcoord.y;
 
-    let screen_size_cluster_x = f32(clusterSet.screen_width) / f32(clusterSet.num_clusters_X);
-    let screen_size_cluster_y = f32(clusterSet.screen_height) / f32(clusterSet.num_clusters_Y);
+    let screen_size_cluster_x = f32(screen_width) / f32(num_clusters_X);
+    let screen_size_cluster_y = f32(screen_height) / f32(num_clusters_Y);
 
     let clusterid_x = u32(screen_pos_x / screen_size_cluster_x);
     let clusterid_y_unflipped = u32(screen_pos_y / screen_size_cluster_y);
-    let clusterid_y = clamp((clusterSet.num_clusters_Y - 1u) - clusterid_y_unflipped, 0u, clusterSet.num_clusters_Y - 1u);
+    let clusterid_y = clamp((num_clusters_Y - 1u) - clusterid_y_unflipped, 0u, num_clusters_Y - 1u);
 
     let pos_view = (camera.view_mat * vec4f(in.pos_world, 1.0)).xyz;
 
@@ -63,16 +74,16 @@ fn main(in: FragmentInput) -> @location(0) vec4f
     let clamped_Z_positive = clamp(- z_view, near, far);
 
     let logFN = log(far/near);
-    let SCALE = f32(clusterSet.num_clusters_Z) / logFN;
+    let SCALE = f32(num_clusters_Z) / logFN;
     let BIAS = SCALE * log(near);
 
 
     let slice = log(clamped_Z_positive) * SCALE - BIAS;
 
-    let cluster_z = clamp(u32(floor(slice)), 0u, clusterSet.num_clusters_Z - 1u);
+    let cluster_z = clamp(u32(floor(slice)), 0u, num_clusters_Z - 1u);
 
-    let cluster_index = cluster_z * (clusterSet.num_clusters_X * clusterSet.num_clusters_Y) +
-                          clusterid_y * clusterSet.num_clusters_X +
+    let cluster_index = cluster_z * (num_clusters_X * num_clusters_Y) +
+                          clusterid_y * num_clusters_X +
                           clusterid_x;
 
 
@@ -163,10 +174,7 @@ fn main(in: FragmentInput) -> @location(0) vec4f
         totalLightContrib += calculateLightContrib(light, in.pos_world, normalized_normal);
     }
 
-    var ambient: vec3f;
-
-    ambient = vec3f(0.05, 0.05, 0.05);
-
+    let ambient = vec3f(${ambient[0]}, ${ambient[1]}, ${ambient[2]});
     // if(count > 0)
     // {
     //     ambient = vec3f(0.05, 0.05, 0.05); 
@@ -177,7 +185,7 @@ fn main(in: FragmentInput) -> @location(0) vec4f
     // }
 
     //let ambient = vec3f(0.05, 0.05, 0.05); 
-    var finalColor = diffuseColor.rgb * (totalLightContrib );
+    let finalColor = diffuseColor.rgb * (totalLightContrib + ambient);
     
 
     // totalLightContrib = vec3f(0, 0, 0);

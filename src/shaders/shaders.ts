@@ -27,7 +27,6 @@ import clusteringComputeRaw from './clustering.cs.wgsl?raw';
 const numClustersXConfig = 10;
 const numClustersYConfig = 10;
 const numClusterZConfig = 32;
-
 const numTotalClustersConfig = numClustersXConfig * numClustersYConfig * numClusterZConfig;
 
 export const constants = {
@@ -35,6 +34,8 @@ export const constants = {
     numClustersY: numClustersYConfig,
     numClustersZ: numClusterZConfig,
     numTotalClustersConfig: numTotalClustersConfig,
+
+    ambient: [0.05, 0.05, 0.05],
 
     bindGroup_scene: 0,
     bindGroup_model: 1,
