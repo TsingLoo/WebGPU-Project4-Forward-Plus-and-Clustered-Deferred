@@ -20,9 +20,6 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
     geometrySpecularDeviceTexture: GPUTexture;
     geometrySpecularDeviceTextureView: GPUTextureView;
 
-    shadingOutputDeviceTexture: GPUTexture;
-    shadingOutputDeviceTextureView: GPUTextureView;
-
     //the index of the first light in each tile and the number of lights in each tile
     tileOffsetsDeviceBuffer: GPUBuffer;
     globalLightIndicesDeviceBuffer: GPUBuffer;
@@ -42,14 +39,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
 
     shadingBindGroupLayout: GPUBindGroupLayout; 
     shadingBindGroup: GPUBindGroup;
-    //shadingPipeline: GPURenderPipeline;
-
-    shadingComputePipeline: GPUComputePipeline;
-
-    blitSampler: GPUSampler;
-    blitBindGroupLayout: GPUBindGroupLayout;
-    blitBindGroup: GPUBindGroup;
-    blitPipeline: GPURenderPipeline;
+    shadingPipeline: GPURenderPipeline;
 
     constructor(stage: Stage) {
         super(stage);
@@ -100,20 +90,10 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         })
         this.geometrySpecularDeviceTextureView = this.geometrySpecularDeviceTexture.createView();
 
-        this.shadingOutputDeviceTexture = renderer.device.createTexture({
-            label: "shading output Texture",
-            size: geometryDeviceTextureSize,
-            format: "rgba8unorm",
-            usage: GPUTextureUsage.STORAGE_BINDING |
-                   GPUTextureUsage.TEXTURE_BINDING
-        })
-        this.shadingOutputDeviceTextureView = this.shadingOutputDeviceTexture.createView();
-
         this.tileOffsetsDeviceBuffer = renderer.device.createBuffer({
             size: shaders.constants.numTotalClustersConfig * 2 * 4, // offset and count per tile
             usage: GPUBufferUsage.STORAGE,
         })
-
 
         this.zeroDeviceBuffer = renderer.device.createBuffer({
             size: 4,
@@ -213,69 +193,61 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             entries: [
                 { // Camera Uniforms
                     binding: 0,
-                    visibility: GPUShaderStage.COMPUTE,
+                    visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
                     buffer: { type: "uniform" }
                 },
                 {   // Light Set
                     binding: 1,
-                    visibility: GPUShaderStage.COMPUTE,
+                    visibility: GPUShaderStage.FRAGMENT,
                     buffer: { type: "read-only-storage" }
                 },
                 {
                     //Tile offsets
                     binding: 2,
-                    visibility: GPUShaderStage.COMPUTE,
+                    visibility: GPUShaderStage.FRAGMENT,
                     buffer: { type: "read-only-storage" } 
                 },
                 {
                     //Global light indices
                     binding: 3,
-                    visibility: GPUShaderStage.COMPUTE,
+                    visibility: GPUShaderStage.FRAGMENT,
                     buffer: { type: "read-only-storage" } 
                 },
                 {
                     //Cluster set
                     binding: 4,
-                    visibility: GPUShaderStage.COMPUTE,
+                    visibility: GPUShaderStage.FRAGMENT,
                     buffer: { type: "uniform" }
                 },
                 {
                     // gbuffer albedo
                     binding: 5,
-                    visibility: GPUShaderStage.COMPUTE,
+                    visibility: GPUShaderStage.FRAGMENT,
                     texture: { sampleType: "float" }
                 },
                 {
                     // gbuffer normal
                     binding: 6,
-                    visibility: GPUShaderStage.COMPUTE,
+                    visibility: GPUShaderStage.FRAGMENT,
                     texture: { sampleType: "unfilterable-float" }
                 },
                 {
                     // gbuffer position
                     binding: 7,
-                    visibility: GPUShaderStage.COMPUTE,
+                    visibility: GPUShaderStage.FRAGMENT,
                     texture: { sampleType: "unfilterable-float" }
                 },
                 {
                     // gbuffer specular
                     binding: 8,
-                    visibility: GPUShaderStage.COMPUTE,
+                    visibility: GPUShaderStage.FRAGMENT,
                     texture: { sampleType: "float" }
                 },
                 {
                     // gbuffer depth
                     binding: 9,
-                    visibility: GPUShaderStage.COMPUTE,
+                    visibility: GPUShaderStage.FRAGMENT,
                     texture: { sampleType: "depth" }
-                },
-                {
-                    binding: 10,
-                    visibility: GPUShaderStage.COMPUTE,
-                    storageTexture: {
-                        access: "write-only",
-                        format: "rgba8unorm",
-                    }
                 }
             ]
         });
@@ -286,6 +258,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 bindGroupLayouts: [
                     this.geometryBindGroupLayout,
                     renderer.modelBindGroupLayout,
+                    renderer.materialBindGroupLayout,
                 ]
             }),
             depthStencil: {
@@ -299,6 +272,12 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 }),
                 buffers: [ renderer.vertexBufferLayout ]
             },
+            fragment:{
+                module: renderer.device.createShaderModule({
+                    code: shaders.zPrepassFragSrc
+                }),
+                targets: []
+            }
         });
 
 
@@ -377,93 +356,28 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 { binding: 6, resource: this.geometryNormalDeviceTextureView },
                 { binding: 7, resource: this.geometryPositionDeviceTextureView },
                 { binding: 8, resource: this.geometrySpecularDeviceTextureView },
-                { binding: 9, resource: this.depthTextureView},
-                { binding: 10, resource: this.shadingOutputDeviceTextureView }
+                { binding: 9, resource: this.depthTextureView}
             ]
         });
 
-        // this.shadingPipeline = renderer.device.createRenderPipeline({
-        //     label: "shading pipeline",
-        //     layout: renderer.device.createPipelineLayout({
-        //         bindGroupLayouts: [
-        //             this.shadingBindGroupLayout
-        //         ]
-        //     }),
-        //     vertex: {
-        //         module: renderer.device.createShaderModule({ code: shaders.clusteredDeferredFullscreenVertSrc, label: "final vertex(triangle) shader",}),
-        //         entryPoint: "main"
-        //     },
-        //     fragment: {
-        //         module: renderer.device.createShaderModule({
-        //             label: "shading fragment shader",  
-        //             code: shaders.clusteredDeferredFragSrc,
-        //         }),
-        //         entryPoint: "main",
-        //         targets: [ { format: renderer.canvasFormat }]
-        //     }
-        // });
-
-        this.shadingComputePipeline = renderer.device.createComputePipeline({
-            label: "Shading Compute Pipeline",
+        this.shadingPipeline = renderer.device.createRenderPipeline({
+            label: "shading pipeline",
             layout: renderer.device.createPipelineLayout({
-                bindGroupLayouts: [ this.shadingBindGroupLayout ]
-            }),
-            compute: {
-                module: renderer.device.createShaderModule({
-                    label: "Shading Compute Shader",
-                    code: shaders.clusteredDeferredComputeSrc
-                }),
-                entryPoint: "main"
-            }
-        })
-
-        this.blitSampler = renderer.device.createSampler({
-            magFilter: 'linear',
-            minFilter: 'linear',
-        });
-
-        this.blitBindGroupLayout = renderer.device.createBindGroupLayout({
-            label: "Blit Bind Group Layout",
-            entries: [
-                {
-                    binding: 0,
-                    visibility: GPUShaderStage.FRAGMENT,
-                    texture: {}
-                },
-                {
-                    binding: 1,
-                    visibility: GPUShaderStage.FRAGMENT,
-                    sampler: {}
-                }
-            ]
-        });
-
-        this.blitBindGroup = renderer.device.createBindGroup({
-            label: "Blit Bind Group",
-            layout: this.blitBindGroupLayout,
-            entries: [
-                { binding: 0, resource: this.shadingOutputDeviceTextureView }, 
-                { binding: 1, resource: this.blitSampler }
-            ]
-        });
-
-        this.blitPipeline = renderer.device.createRenderPipeline({
-            label: "Blit Pipeline",
-            layout: renderer.device.createPipelineLayout({
-                bindGroupLayouts: [this.blitBindGroupLayout]
+                bindGroupLayouts: [
+                    this.shadingBindGroupLayout
+                ]
             }),
             vertex: {
-                module: renderer.device.createShaderModule({ 
-                    code: shaders.clusteredDeferredFullscreenVertSrc
-                }),
+                module: renderer.device.createShaderModule({ code: shaders.clusteredDeferredFullscreenVertSrc, label: "final vertex(triangle) shader",}),
                 entryPoint: "main"
             },
             fragment: {
-                module: renderer.device.createShaderModule({ 
-                    code: shaders.clusteredDeferredFullscreenFragSrc,
+                module: renderer.device.createShaderModule({
+                    label: "shading fragment shader",  
+                    code: shaders.clusteredDeferredFragSrc,
                 }),
                 entryPoint: "main",
-                targets: [{ format: renderer.canvasFormat }]
+                targets: [ { format: renderer.canvasFormat }]
             }
         });
     }
@@ -487,7 +401,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         this.scene.iterate(node => {
             zPrepass.setBindGroup(shaders.constants.bindGroup_model, node.modelBindGroup);
         }, material => {
-            
+            zPrepass.setBindGroup(shaders.constants.bindGroup_material, material.materialBindGroup);
         }, primitive => {
             zPrepass.setVertexBuffer(0, primitive.vertexBuffer);
             zPrepass.setIndexBuffer(primitive.indexBuffer, 'uint32');
@@ -560,30 +474,23 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         );
         cullingComputePass.end();
 
-        const shadingComputePass = encoder.beginComputePass();
-        shadingComputePass.setPipeline(this.shadingComputePipeline);
-        shadingComputePass.setBindGroup(0, this.shadingBindGroup);
- 
-        const workgroupsX = Math.ceil(renderer.canvas.width / 8);
-        const workgroupsY = Math.ceil(renderer.canvas.height / 8);
-        shadingComputePass.dispatchWorkgroups(workgroupsX, workgroupsY, 1);
-        shadingComputePass.end();
-
-        const blitPass = encoder.beginRenderPass({
-            label: "Blit Pass",
+        const shadingRenderPass = encoder.beginRenderPass({
+            label: "Shading Pass",
             colorAttachments: [
                 {
                     view: canvasTextureView,
-                    clearValue: [0, 0, 0, 1],
+                    clearValue: [0, 0, 0, 0],
                     loadOp: "clear",
                     storeOp: "store"
                 }
             ]
         });
-        blitPass.setPipeline(this.blitPipeline);
-        blitPass.setBindGroup(0, this.blitBindGroup);
-        blitPass.draw(3);
-        blitPass.end();
+        shadingRenderPass.setPipeline(this.shadingPipeline);
+        shadingRenderPass.setBindGroup(shaders.constants.bindGroup_scene, this.shadingBindGroup);
+
+        shadingRenderPass.draw(3, 1, 0, 0);
+
+        shadingRenderPass.end();
 
         renderer.device.queue.submit([encoder.finish()]);
     }
