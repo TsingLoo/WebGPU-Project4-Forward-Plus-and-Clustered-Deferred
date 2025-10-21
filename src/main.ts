@@ -98,7 +98,7 @@ const avgStats = {
 const gui = new GUI();
 gui.add(avgStats, 'avgFPS_20s').name('Avg FPS (20s)').listen();
 
-const desiredOptions = [5, 10, 50, 100, 200, 500, 600, 700, 800, 1000, 1500, 2000, 2500, 3000, 3800, 5000, 6000];
+const desiredOptions = [5, 10, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1250, 1500, 2000, 2500, 3000, 3800, 5000];
 
 const safeOptions = desiredOptions.filter(
     count => count <= Lights.maxNumLights
