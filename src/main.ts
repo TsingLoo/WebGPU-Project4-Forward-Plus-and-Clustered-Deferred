@@ -14,7 +14,8 @@ import { Camera } from './stage/camera';
 import { Stage } from './stage/stage';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-const monitorTime = 7.0;
+const monitorTime = 8.0;
+const restTime = 1000;
 
 await initWebGPU();
 setupLoaders();
@@ -96,9 +97,9 @@ const avgStats = {
 const gui = new GUI();
 gui.add(avgStats, 'avgFPS_20s').name('Avg FPS (20s)').listen();
 
-const desiredMobileOptions = [5, 10, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1250, 1500, 2000, 2500, 3000, 3800, 5000];
+const desiredMobileOptions = [5, 10, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1250, 1450, 1500];
 
-const desiredPCOptions = [1500, 2400, 2500, 2600, 2700, 2800, 2900, 3000, 3200, 3400, 3600, 3800, 4000, 4200, 4400, 4600, 4800, 5000, 6000, 7000, 8000];
+const desiredPCOptions = [1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900, 3000, 3200, 3400, 3600, 3800, 4000, 4200, 4400, 4600, 4800, 5000, 6000, 7000, 8000];
 
 let desiredOptions = isMobileDevice? desiredMobileOptions : desiredPCOptions;
 
@@ -106,10 +107,10 @@ const safeOptions = desiredOptions.filter(
     count => count <= Lights.maxNumLights
 );
 
-if (!safeOptions.includes(Lights.maxNumLights)) {
-    safeOptions.push(Lights.maxNumLights);
-    safeOptions.sort((a, b) => a - b); 
-}
+
+safeOptions.push(desiredOptions[3]);
+safeOptions.sort((a, b) => a - b); 
+
 
 const lightNumSlider = gui.add(lights, 'numLights').min(1).max(Lights.maxNumLights).step(1).onChange(() => {
     lights.updateLightSetUniformNumLights();
@@ -137,7 +138,7 @@ const benchmarkController = {
             lightNumSlider.updateDisplay();
 
             avgStats.avgFPS_20s = `Idling (${lightCount} lights)...`;
-            await sleep(500);
+            await sleep(restTime);
             
             avgStats.reset();
             
