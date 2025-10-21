@@ -20,6 +20,8 @@ import clusteredDeferredComputeSrcRaw from './clusteredDeferred.cs.wgsl?raw';
 import moveLightsComputeRaw from './move_lights.cs.wgsl?raw';
 import clusteringComputeRaw from './clustering.cs.wgsl?raw';
 
+import zPrepassFragRaw from './zPrepass.fs.wgsl?raw';
+
 // CONSTANTS (for use in shaders)
 // =================================
 
@@ -96,3 +98,5 @@ export const clusteredDeferredComputeSrc: string = processShaderRaw(clusteredDef
 
 export const moveLightsComputeSrc: string = processShaderRaw(moveLightsComputeRaw);
 export const clusteringComputeSrc: string = processShaderRaw(clusteringComputeRaw);
+
+export const zPrepassFragSrc: string = processShaderRaw(zPrepassFragRaw);
