@@ -1,3 +1,5 @@
+const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
 import { vec3 } from "wgpu-matrix";
 import { device } from "../renderer";
 
@@ -13,7 +15,8 @@ function hueToRgb(h: number) {
 export class Lights {
     private camera: Camera;
 
-    numLights = 500;
+    numLights = isMobileDevice ? 50 : 500;
+    
     static readonly maxNumLights = 5000;
     static readonly numFloatsPerLight = 8; // vec3f is aligned at 16 byte boundaries
 

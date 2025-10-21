@@ -29,6 +29,21 @@ gui.add(lights, 'numLights').min(1).max(Lights.maxNumLights).step(1).onChange(()
     lights.updateLightSetUniformNumLights();
 });
 
+const desiredOptions = [5, 10, 50, 100, 200, 500, 600, 700, 800, 1000, 1500, 2000, 2500, 3000, 3800, 5000, 6000];
+
+const safeOptions = desiredOptions.filter(
+    count => count <= Lights.maxNumLights
+);
+
+if (!safeOptions.includes(Lights.maxNumLights)) {
+    safeOptions.push(Lights.maxNumLights);
+    safeOptions.sort((a, b) => a - b); 
+}
+
+gui.add(lights, 'numLights', safeOptions).onChange(() => {
+    lights.updateLightSetUniformNumLights();
+});
+
 const stage = new Stage(scene, lights, camera, stats);
 
 var renderer: Renderer | undefined;
