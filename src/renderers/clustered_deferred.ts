@@ -286,6 +286,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 bindGroupLayouts: [
                     this.geometryBindGroupLayout,
                     renderer.modelBindGroupLayout,
+                    renderer.materialBindGroupLayout
                 ]
             }),
             depthStencil: {
@@ -299,6 +300,12 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 }),
                 buffers: [ renderer.vertexBufferLayout ]
             },
+            fragment:{
+                module: renderer.device.createShaderModule({
+                    code: shaders.zPrepassFragSrc
+                }),
+                targets: []
+            }
         });
 
 
@@ -487,7 +494,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         this.scene.iterate(node => {
             zPrepass.setBindGroup(shaders.constants.bindGroup_model, node.modelBindGroup);
         }, material => {
-            
+            zPrepass.setBindGroup(shaders.constants.bindGroup_material, material.materialBindGroup);
         }, primitive => {
             zPrepass.setVertexBuffer(0, primitive.vertexBuffer);
             zPrepass.setIndexBuffer(primitive.indexBuffer, 'uint32');
