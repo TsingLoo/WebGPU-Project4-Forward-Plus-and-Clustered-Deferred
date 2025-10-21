@@ -176,7 +176,7 @@ fn main(in: FragmentInput) -> @location(0) vec4f
         totalLightContrib += calculateLightContrib(light, pos_world, normalized_normal);
     }
 
-    let ambient = vec3f(${ambient[0]}, ${ambient[1]}, ${ambient[2]});
+    let ambient = vec3f(${ambientR}, ${ambientG}, ${ambientB});
     // if(count > 0)
     // {
     //     ambient = vec3f(0.05, 0.05, 0.05); 

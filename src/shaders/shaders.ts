@@ -41,7 +41,9 @@ export const constants = {
     averageLightsPerCluster: 1024,
     maxLightsPerCluster: 1024,
 
-    ambient: [0.05, 0.05, 0.05],
+    ambientR: 0.05,
+    ambientG: 0.05,
+    ambientB: 0.05,
 
     bindGroup_scene: 0,
     bindGroup_model: 1,

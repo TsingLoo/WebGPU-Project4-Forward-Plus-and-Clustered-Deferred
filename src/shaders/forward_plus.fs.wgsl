@@ -174,17 +174,8 @@ fn main(in: FragmentInput) -> @location(0) vec4f
         totalLightContrib += calculateLightContrib(light, in.pos_world, normalized_normal);
     }
 
-    let ambient = vec3f(${ambient[0]}, ${ambient[1]}, ${ambient[2]});
-    // if(count > 0)
-    // {
-    //     ambient = vec3f(0.05, 0.05, 0.05); 
-    // }else{
-    //     ambient = vec3f(1.0, 1.0, 1.0);
+    let ambient = vec3f(${ambientR}, ${ambientG}, ${ambientB});
 
-    //     return vec4(ambient, 1);
-    // }
-
-    //let ambient = vec3f(0.05, 0.05, 0.05); 
     let finalColor = diffuseColor.rgb * (totalLightContrib + ambient);
     
 
