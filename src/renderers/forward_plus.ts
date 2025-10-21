@@ -37,7 +37,7 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         this.depthTextureView = this.depthTexture.createView();
 
         this.tileOffsetsDeviceBuffer = renderer.device.createBuffer({
-            size: shaders.constants.totalTilesCount * 2 * 4, // offset and count per tile
+            size: shaders.constants.numTotalClustersConfig * 2 * 4, // offset and count per tile
             usage: GPUBufferUsage.STORAGE,
         })
 
@@ -60,13 +60,13 @@ export class ForwardPlusRenderer extends renderer.Renderer {
 
         uintView[0] = renderer.canvas.width;
         uintView[1] = renderer.canvas.height;
-        uintView[2] = shaders.constants.tilesizeX;
-        uintView[3] = shaders.constants.tilesizeY;
-        uintView[4] = shaders.constants.tilesizeZ;
+        uintView[2] = shaders.constants.numClustersX;
+        uintView[3] = shaders.constants.numClustersY;
+        uintView[4] = shaders.constants.numClustersZ;
         this.clusterSetDeviceBuffer.unmap();
 
         const averageLightsPerTile = 64; 
-        const maxIndices = shaders.constants.totalTilesCount * averageLightsPerTile;
+        const maxIndices = shaders.constants.numTotalClustersConfig * averageLightsPerTile;
 
         this.globalLightIndicesDeviceBuffer = renderer.device.createBuffer({
             size: 4 + maxIndices * 4, // one counter and maxLights indices
@@ -267,9 +267,9 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         cullingComputePass.setPipeline(this.cullingPipeline);
         cullingComputePass.setBindGroup(shaders.constants.bindGroup_scene, this.cullingBindGroup);
         cullingComputePass.dispatchWorkgroups(
-            shaders.constants.tilesizeX, 
-            shaders.constants.tilesizeY, 
-            shaders.constants.tilesizeZ
+            shaders.constants.numClustersX, 
+            shaders.constants.numClustersY, 
+            shaders.constants.numClustersZ
         );
         cullingComputePass.end();
 

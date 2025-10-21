@@ -27,7 +27,7 @@
 
 struct FragmentInput
 {
-    @builtin(position) clip_pos: vec4f,
+    @builtin(position) fragcoord: vec4f,
 
     @location(0) pos_world: vec3f,
     @location(1) nor_world: vec3f,
@@ -42,39 +42,112 @@ fn main(in: FragmentInput) -> @location(0) vec4f
         discard;
     }
 
-    let screen_pos_x = (in.clip_pos.x / in.clip_pos.w * 0.5 + 0.5) * f32(clusterSet.screen_width);
-    let screen_pos_y = (in.clip_pos.y / in.clip_pos.w * -0.5 + 0.5) * f32(clusterSet.screen_height);
+    let screen_pos_x = in.fragcoord.x;
+    let screen_pos_y = in.fragcoord.y;
 
-    let cluster_x = u32(screen_pos_x / (f32(clusterSet.screen_width) / f32(clusterSet.num_clusters_X)));
-    let cluster_y = u32(screen_pos_y / (f32(clusterSet.screen_height) / f32(clusterSet.num_clusters_Y)));
+    let screen_size_cluster_x = f32(clusterSet.screen_width) / f32(clusterSet.num_clusters_X);
+    let screen_size_cluster_y = f32(clusterSet.screen_height) / f32(clusterSet.num_clusters_Y);
+
+    let clusterid_x = u32(screen_pos_x / screen_size_cluster_x);
+    let clusterid_y_unflipped = u32(screen_pos_y / screen_size_cluster_y);
+    let clusterid_y = clamp((clusterSet.num_clusters_Y - 1u) - clusterid_y_unflipped, 0u, clusterSet.num_clusters_Y - 1u);
 
     let pos_view = (camera.view_mat * vec4f(in.pos_world, 1.0)).xyz;
-    let z_view = pos_view.z;
 
-    let num_z_slices = f32(clusterSet.num_clusters_Z);
+    //z_view is negative in front of the camera
+    let z_view = pos_view.z;
 
     let near = camera.near_plane; 
     let far = camera.far_plane;
 
-    let clamped_z_view = clamp(z_view, -far, -near);
+    let clamped_Z_positive = clamp(- z_view, near, far);
+
+    let logFN = log(far/near);
+    let SCALE = f32(clusterSet.num_clusters_Z) / logFN;
+    let BIAS = SCALE * log(near);
 
 
-    let log_depth = log(-clamped_z_view / near); // Log of positive value
-    let log_ratio = log(far / near);
+    let slice = log(clamped_Z_positive) * SCALE - BIAS;
 
-    let safe_log_ratio = select(log_ratio, 1.0, log_ratio <= 0.0); 
-
-    let z_slice_float = num_z_slices * log_depth / safe_log_ratio;
-
-    let cluster_z = clamp(u32(floor(z_slice_float)), 0u, clusterSet.num_clusters_Z - 1u);
+    let cluster_z = clamp(u32(floor(slice)), 0u, clusterSet.num_clusters_Z - 1u);
 
     let cluster_index = cluster_z * (clusterSet.num_clusters_X * clusterSet.num_clusters_Y) +
-                          cluster_y * clusterSet.num_clusters_X +
-                          cluster_x;
+                          clusterid_y * clusterSet.num_clusters_X +
+                          clusterid_x;
+
+
+// // --- DEBUG VISUALIZATION (Unique Color Per Cluster) --- 🌈
+//     // Calculate total clusters for normalization (used in color generation)
+//     let total_clusters_f = f32(clusterSet.num_clusters_X * clusterSet.num_clusters_Y * clusterSet.num_clusters_Z);
+
+//     // Generate a color based on the index.
+//     // We can use a simple method mapping the index to hue.
+//     let hue = f32(cluster_index) / total_clusters_f; // Hue ranges from 0.0 to approx 1.0
+
+//     // Simple Hue to RGB conversion (approximated)
+//     let R = abs(hue * 6.0 - 3.0) - 1.0;
+//     let G = 2.0 - abs(hue * 6.0 - 2.0);
+//     let B = 2.0 - abs(hue * 6.0 - 4.0);
+//     let cluster_color = clamp(vec3f(R, G, B), vec3f(0.0), vec3f(1.0));
+
+//     // Make clusters with index 0 black just to clearly identify it
+//     // if (cluster_index == 0u) {
+//     //     cluster_color = vec3f(0.0);
+//     // }
+
+//     // Output the generated unique color
+//     return vec4f(cluster_color, 1.0);
+// // --- DEBUG VISUALIZATION END (Unique Color Per Cluster) --- 🌈
+
 
     let lightmeta = tileOffsets[cluster_index];
     let offset = lightmeta.offset;
     let count = lightmeta.count;
+
+    // --- DEBUG VISUALIZATION (Offset Heatmap) --- 💾
+    // Define an estimated maximum possible offset. This depends on how large your
+    // globalLightIndices buffer is and how many lights are typically assigned.
+    // calculation from TypeScript (e.g., totalClusters * averageLightsPerTile)
+    // Or you could pass this maximum value via a uniform buffer.
+    // let max_possible_offset = f32(clusterSet.num_clusters_X * clusterSet.num_clusters_Y * clusterSet.num_clusters_Z * 64u); // Example: 3456 clusters * 64 lights/cluster
+
+    // // Normalize the offset to the [0.0, 1.0] range
+    // // Avoid division by zero if max_possible_offset could be 0
+    // let normalized_offset = clamp(f32(offset) / max(1.0, max_possible_offset), 0.0, 1.0);
+
+    // // Output as grayscale: Dark means small offset (early in the global list),
+    // // Light means large offset (later in the global list)
+    // return vec4f(normalized_offset, normalized_offset, normalized_offset, 1.0);
+    
+    // --- DEBUG END (Offset Heatmap) --- 💾
+
+
+    // // --- DEBUG VISUALIZATION (Heatmap of Light Count) --- 🔥
+    // // Define a maximum count for the visualization. Counts above this will be clamped to red.
+    // // Adjust this value based on your scene and MAX_LIGHTS_PER_CLUSTER. 64 is a reasonable start.
+    // let max_vis_count = 256.0; 
+
+    // // Normalize the count to the [0.0, 1.0] range
+    // let normalized_count = clamp(f32(count) / max_vis_count, 0.0, 1.0);
+
+    // // Simple heatmap: Blue (low) -> Green (medium) -> Red (high)
+    // var heatmap_color: vec3f;
+    // if (normalized_count < 0.5) {
+    //     // Interpolate Blue (0,0,1) to Green (0,1,0)
+    //     heatmap_color = mix(vec3f(0.0, 0.0, 1.0), vec3f(0.0, 1.0, 0.0), normalized_count * 2.0);
+    // } else {
+    //     // Interpolate Green (0,1,0) to Red (1,0,0)
+    //     heatmap_color = mix(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), (normalized_count - 0.5) * 2.0);
+    // }
+
+    // // Special case for zero lights (optional, e.g., show as black or gray)
+    // if (count == 0u) {
+    //     heatmap_color = vec3f(0.1, 0.1, 0.1); // Dark gray for empty clusters
+    // }
+
+    // // Return the heatmap color
+    // return vec4f(heatmap_color, 1.0);
+    // // --- DEBUG END (Heatmap of Light Count) --- 🔥
 
     let normalized_normal = normalize(in.nor_world); // Normalize normal once
 
@@ -85,13 +158,35 @@ fn main(in: FragmentInput) -> @location(0) vec4f
         
         // Get the light data
         let light = lightSet.lights[light_idx];
-        
+
         // Calculate contribution (passing world space pos/normal and view matrix)
         totalLightContrib += calculateLightContrib(light, in.pos_world, normalized_normal);
     }
 
-    let ambient = vec3f(0.05, 0.05, 0.05); 
-    let finalColor = diffuseColor.rgb * (totalLightContrib + ambient);
+    var ambient: vec3f;
+
+    ambient = vec3f(0.05, 0.05, 0.05);
+
+    // if(count > 0)
+    // {
+    //     ambient = vec3f(0.05, 0.05, 0.05); 
+    // }else{
+    //     ambient = vec3f(1.0, 1.0, 1.0);
+
+    //     return vec4(ambient, 1);
+    // }
+
+    //let ambient = vec3f(0.05, 0.05, 0.05); 
+    var finalColor = diffuseColor.rgb * (totalLightContrib );
     
+
+    // totalLightContrib = vec3f(0, 0, 0);
+    // for (var lightIdx = 0u; lightIdx < lightSet.numLights; lightIdx++) {
+    //     let light = lightSet.lights[lightIdx];
+    //     totalLightContrib += calculateLightContrib(light, in.pos_world, normalize(in.nor_world));
+    // }
+
+    // finalColor = diffuseColor.rgb * totalLightContrib;
+
     return vec4(finalColor, 1);
 }

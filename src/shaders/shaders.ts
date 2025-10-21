@@ -24,17 +24,17 @@ import clusteringComputeRaw from './clustering.cs.wgsl?raw';
 // Note that these are declared in a somewhat roundabout way because otherwise minification will drop variables
 // that are unused in host side code.
 
-const tilesizeX = 16;
-const tilesizeY = 9;
-const tilesizeZ = 24;
+const numClustersXConfig = 10;
+const numClustersYConfig = 10;
+const numClusterZConfig = 32;
 
-const totalTilesCount = tilesizeX * tilesizeY * tilesizeZ;
+const numTotalClustersConfig = numClustersXConfig * numClustersYConfig * numClusterZConfig;
 
 export const constants = {
-    tilesizeX,
-    tilesizeY,
-    tilesizeZ,
-    totalTilesCount,
+    numClustersX: numClustersXConfig,
+    numClustersY: numClustersYConfig,
+    numClustersZ: numClusterZConfig,
+    numTotalClustersConfig: numTotalClustersConfig,
 
     bindGroup_scene: 0,
     bindGroup_model: 1,

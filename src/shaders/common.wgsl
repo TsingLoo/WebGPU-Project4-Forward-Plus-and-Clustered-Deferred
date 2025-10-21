@@ -29,8 +29,8 @@ struct CameraUniforms {
     view_proj_mat: mat4x4f,
     inv_proj_mat: mat4x4f,
 
-    view_mat: mat4x4f,
     proj_mat: mat4x4f,
+    view_mat: mat4x4f,
 
     near_plane: f32,
     far_plane: f32,
