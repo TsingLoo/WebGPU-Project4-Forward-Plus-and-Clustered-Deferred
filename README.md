@@ -84,7 +84,11 @@ Both deferred rendering methods exhibit identical performance at lower light cou
 
 The performance advantage comes from the compute shader’s ability to skip the GPU’s fixed-function rasterization stage and run directly on compute units. Instead of running per-pixel like fragment shaders, compute shaders work in small groups allowing threads to share and reuse lighting data efficiently using fast shared memory. This reduces unnecessary global memory access and lowers overall bandwidth usage.
 
+# Debug Images 
 
+![](./img/chrome_THoVq9rDiw.png)
+
+![](./img/chrome_NtVdUQ8qm5.png)
 
 # Credits
 
