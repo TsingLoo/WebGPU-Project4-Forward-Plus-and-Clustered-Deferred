@@ -17,7 +17,7 @@ export class Lights {
 
     numLights = isMobileDevice ? 50 : 500;
     
-    static readonly maxNumLights = 5000;
+    static readonly maxNumLights = 10000;
     static readonly numFloatsPerLight = 8; // vec3f is aligned at 16 byte boundaries
 
     static readonly lightIntensity = 0.1;
