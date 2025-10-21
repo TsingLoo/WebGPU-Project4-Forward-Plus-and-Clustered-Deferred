@@ -11,6 +11,7 @@
     "@types/dat.gui": "^0.7.13",
     "@types/seedrandom": "^3.0.8",
     "@types/stats.js": "^0.17.3",
+    "@vitejs/plugin-basic-ssl": "^2.1.0",
     "@webgpu/types": "^0.1.44",
     "typescript": "^5.2.2",
     "vite": "^7.1.9"

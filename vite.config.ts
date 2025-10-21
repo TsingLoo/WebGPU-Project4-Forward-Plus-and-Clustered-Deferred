@@ -1,8 +1,12 @@
 import { defineConfig } from 'vite'
+import basicSsl from '@vitejs/plugin-basic-ssl'
 
 export default defineConfig({
-    build: {
-        target: 'esnext'
-    },
-    base: process.env.GITHUB_ACTIONS_BASE || undefined
+  plugins: [
+    basicSsl()
+  ],
+  server: {
+    host: true,
+    https: true
+  }
 })
