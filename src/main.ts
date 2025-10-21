@@ -1,3 +1,5 @@
+const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
 import Stats from 'stats.js';
 import { GUI } from 'dat.gui';
 
@@ -12,6 +14,7 @@ import { Camera } from './stage/camera';
 import { Stage } from './stage/stage';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const monitorTime = 7.0;
 
 await initWebGPU();
 setupLoaders();
@@ -35,19 +38,14 @@ stats.begin = () => {
         const elapsedTime = (now - avgStats.startTime) / 1000; 
         const frameTime = now - avgStats.lastFrameTime;
 
-        if (elapsedTime < 20.0) {
-            if (frameTime > 0) {
-                const currentFPS = 1000.0 / frameTime;
-                avgStats.frames.push(currentFPS);
-            }
+        if (elapsedTime < monitorTime) {
+            avgStats.frameCount++;
         } else {
             avgStats.collecting = false;
-            
-            if (avgStats.frames.length > 0) {
-                const sum = avgStats.frames.reduce((a, b) => a + b, 0);
-                const avg = sum / avgStats.frames.length;
+            if (avgStats.frameCount > 0) {
+                const avg = avgStats.frameCount / monitorTime;
                 avgStats.avgFPS_20s = avg.toFixed(2);
-            } else {
+            }else{
                 avgStats.avgFPS_20s = 'N/A';
             }
         }
@@ -82,14 +80,14 @@ document.body.appendChild(resultsElement);
 const avgStats = {
     startTime: performance.now(),
     lastFrameTime: performance.now(),
-    frames: [] as number[],
+    frameCount: 0,
     collecting: false,
     avgFPS_20s: 'Idle',
 
     reset: () => {
         avgStats.startTime = performance.now();
         avgStats.lastFrameTime = avgStats.startTime;
-        avgStats.frames = [];
+        avgStats.frameCount = 0;
         avgStats.collecting = true;
         avgStats.avgFPS_20s = 'Calculating...';
     }
@@ -98,7 +96,11 @@ const avgStats = {
 const gui = new GUI();
 gui.add(avgStats, 'avgFPS_20s').name('Avg FPS (20s)').listen();
 
-const desiredOptions = [5, 10, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1250, 1500, 2000, 2500, 3000, 3800, 5000];
+const desiredMobileOptions = [5, 10, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1250, 1500, 2000, 2500, 3000, 3800, 5000];
+
+const desiredPCOptions = [1500, 2400, 2500, 2600, 2700, 2800, 2900, 3000, 3200, 3400, 3600, 3800, 4000, 4200, 4400, 4600, 4800, 5000, 6000, 7000, 8000];
+
+let desiredOptions = isMobileDevice? desiredMobileOptions : desiredPCOptions;
 
 const safeOptions = desiredOptions.filter(
     count => count <= Lights.maxNumLights
@@ -135,7 +137,7 @@ const benchmarkController = {
             lightNumSlider.updateDisplay();
 
             avgStats.avgFPS_20s = `Idling (${lightCount} lights)...`;
-            await sleep(3000);
+            await sleep(500);
             
             avgStats.reset();
             
