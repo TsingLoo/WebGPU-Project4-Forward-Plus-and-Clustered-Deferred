@@ -5,7 +5,7 @@
 @group(${bindGroup_scene}) @binding(3) var<storage, read_write> globalLightIndices: LightIndexList;
 @group(${bindGroup_scene}) @binding(4) var<uniform> clusterSet: ClusterSet;
 
-const MAX_LIGHTS_PER_CLUSTER = 256u;
+const MAX_LIGHTS_PER_CLUSTER = ${maxLightsPerCluster}u;
 var<workgroup> local_light_indices: array<u32, MAX_LIGHTS_PER_CLUSTER>;
 // ------------------------------------
 // Calculating cluster bounds:

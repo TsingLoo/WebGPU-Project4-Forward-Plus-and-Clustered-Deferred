@@ -65,8 +65,7 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         uintView[4] = shaders.constants.numClustersZ;
         this.clusterSetDeviceBuffer.unmap();
 
-        const averageLightsPerTile = 64; 
-        const maxIndices = shaders.constants.numTotalClustersConfig * averageLightsPerTile;
+        const maxIndices = shaders.constants.numTotalClustersConfig * shaders.constants.averageLightsPerCluster;
 
         this.globalLightIndicesDeviceBuffer = renderer.device.createBuffer({
             size: 4 + maxIndices * 4, // one counter and maxLights indices

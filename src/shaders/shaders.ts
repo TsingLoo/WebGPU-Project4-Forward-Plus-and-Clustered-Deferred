@@ -26,9 +26,9 @@ import clusteringComputeRaw from './clustering.cs.wgsl?raw';
 // Note that these are declared in a somewhat roundabout way because otherwise minification will drop variables
 // that are unused in host side code.
 
-const numClustersXConfig = 10;
-const numClustersYConfig = 10;
-const numClusterZConfig = 32;
+const numClustersXConfig = 16;
+const numClustersYConfig = 16;
+const numClusterZConfig = 16;
 const numTotalClustersConfig = numClustersXConfig * numClustersYConfig * numClusterZConfig;
 
 export const constants = {
@@ -36,6 +36,10 @@ export const constants = {
     numClustersY: numClustersYConfig,
     numClustersZ: numClusterZConfig,
     numTotalClustersConfig: numTotalClustersConfig,
+
+    
+    averageLightsPerCluster: 1024,
+    maxLightsPerCluster: 1024,
 
     ambient: [0.05, 0.05, 0.05],
 

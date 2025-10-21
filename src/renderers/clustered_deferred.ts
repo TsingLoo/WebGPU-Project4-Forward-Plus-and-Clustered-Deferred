@@ -119,7 +119,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         uintView[4] = shaders.constants.numClustersZ;
         this.clusterSetDeviceBuffer.unmap();
 
-        const averageLightsPerTile = 64; 
+        const averageLightsPerTile = shaders.constants.averageLightsPerCluster; 
         const maxIndices = shaders.constants.numTotalClustersConfig * averageLightsPerTile;
 
         this.globalLightIndicesDeviceBuffer = renderer.device.createBuffer({
