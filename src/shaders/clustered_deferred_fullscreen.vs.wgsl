@@ -1,3 +1,21 @@
-// TODO-3: implement the Clustered Deferred fullscreen vertex shader
+struct VertexOutput {
+    @builtin(position) position: vec4f,
+}
 
-// This shader should be very simple as it does not need all of the information passed by the the naive vertex shader.
+@vertex
+fn main(
+    @builtin(vertex_index) vertexIndex: u32 
+) -> VertexOutput {
+
+    const pos = array(
+        vec2f(-1.0, -1.0),
+        vec2f( 3.0, -1.0),
+        vec2f(-1.0,  3.0)
+    );
+
+    var out: VertexOutput;
+    
+    out.position = vec4f(pos[vertexIndex], 0.0, 1.0);
+    
+    return out;
+}

@@ -50,7 +50,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         this.depthTexture = renderer.device.createTexture({
             size: [renderer.canvas.width, renderer.canvas.height],
             format: "depth24plus",
-            usage: GPUTextureUsage.RENDER_ATTACHMENT
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
         });
         this.depthTextureView = this.depthTexture.createView();
 
@@ -218,6 +218,36 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                     binding: 4,
                     visibility: GPUShaderStage.FRAGMENT,
                     buffer: { type: "uniform" }
+                },
+                {
+                    // gbuffer albedo
+                    binding: 5,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: { sampleType: "float" }
+                },
+                {
+                    // gbuffer normal
+                    binding: 6,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: { sampleType: "unfilterable-float" }
+                },
+                {
+                    // gbuffer position
+                    binding: 7,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: { sampleType: "unfilterable-float" }
+                },
+                {
+                    // gbuffer specular
+                    binding: 8,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: { sampleType: "float" }
+                },
+                {
+                    // gbuffer depth
+                    binding: 9,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: { sampleType: "depth" }
                 }
             ]
         });
@@ -226,7 +256,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             label: "Z-Prepass pipeline",
             layout: renderer.device.createPipelineLayout({
                 bindGroupLayouts: [
-                    this.shadingBindGroupLayout,
+                    this.geometryBindGroupLayout,
                     renderer.modelBindGroupLayout,
                 ]
             }),
@@ -314,27 +344,25 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 { binding: 1, resource: { buffer: this.lights.lightSetStorageBuffer }},
                 { binding: 2, resource: { buffer: this.tileOffsetsDeviceBuffer }},
                 { binding: 3, resource: { buffer: this.globalLightIndicesDeviceBuffer }},
-                { binding: 4, resource: { buffer: this.clusterSetDeviceBuffer }}
+                { binding: 4, resource: { buffer: this.clusterSetDeviceBuffer }},
+                { binding: 5, resource: this.geometryAlbedoDeviceTextureView },
+                { binding: 6, resource: this.geometryNormalDeviceTextureView },
+                { binding: 7, resource: this.geometryPositionDeviceTextureView },
+                { binding: 8, resource: this.geometrySpecularDeviceTextureView },
+                { binding: 9, resource: this.depthTextureView}
             ]
         });
 
         this.shadingPipeline = renderer.device.createRenderPipeline({
+            label: "shading pipeline",
             layout: renderer.device.createPipelineLayout({
                 bindGroupLayouts: [
-                    this.shadingBindGroupLayout,
-                    renderer.modelBindGroupLayout,
-                    renderer.materialBindGroupLayout
+                    this.shadingBindGroupLayout
                 ]
             }),
-            depthStencil: {
-                depthWriteEnabled: false,
-                depthCompare: "equal",
-                format: "depth24plus"
-            },
             vertex: {
-                module: renderer.device.createShaderModule({ code: shaders.naiveVertSrc, label: "shading vertex shader",}),
-                entryPoint: "main",
-                buffers: [ renderer.vertexBufferLayout ]
+                module: renderer.device.createShaderModule({ code: shaders.clusteredDeferredFullscreenVertSrc, label: "final vertex(triangle) shader",}),
+                entryPoint: "main"
             },
             fragment: {
                 module: renderer.device.createShaderModule({
@@ -362,7 +390,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             }
         });
         zPrepass.setPipeline(this.zPrepassPipeline);
-        zPrepass.setBindGroup(shaders.constants.bindGroup_scene, this.shadingBindGroup);
+        zPrepass.setBindGroup(shaders.constants.bindGroup_scene, this.geometryBindGroup);
         this.scene.iterate(node => {
             zPrepass.setBindGroup(shaders.constants.bindGroup_model, node.modelBindGroup);
         }, material => {
@@ -448,24 +476,13 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                     loadOp: "clear",
                     storeOp: "store"
                 }
-            ],
-            depthStencilAttachment: {
-                view: this.depthTextureView,
-                depthReadOnly: true
-            }
+            ]
         });
         shadingRenderPass.setPipeline(this.shadingPipeline);
         shadingRenderPass.setBindGroup(shaders.constants.bindGroup_scene, this.shadingBindGroup);
 
-        this.scene.iterate(node => {
-            shadingRenderPass.setBindGroup(shaders.constants.bindGroup_model, node.modelBindGroup);
-        }, material => {
-            shadingRenderPass.setBindGroup(shaders.constants.bindGroup_material, material.materialBindGroup);
-        }, primitive => {
-            shadingRenderPass.setVertexBuffer(0, primitive.vertexBuffer);
-            shadingRenderPass.setIndexBuffer(primitive.indexBuffer, 'uint32');
-            shadingRenderPass.drawIndexed(primitive.numIndices);
-        });
+        shadingRenderPass.draw(3, 1, 0, 0);
+
         shadingRenderPass.end();
 
         renderer.device.queue.submit([encoder.finish()]);
