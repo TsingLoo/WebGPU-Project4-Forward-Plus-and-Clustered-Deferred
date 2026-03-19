@@ -1,6 +1,7 @@
 import * as renderer from '../renderer';
 import * as shaders from '../shaders/shaders';
 import { Stage } from '../stage/stage';
+import { DDGI } from '../stage/ddgi';
 
 export class ClusteredDeferredRenderer extends renderer.Renderer {
     depthTexture: GPUTexture;
@@ -49,11 +50,18 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
     skyboxBindGroupLayout: GPUBindGroupLayout;
     skyboxBindGroup: GPUBindGroup;
 
+    ddgi: DDGI;
+    private stageEnv: import('../stage/environment').Environment;
+    private stage: import('../stage/stage').Stage;
+
     constructor(stage: Stage) {
         super(stage);
 
         let geometryDeviceTextureSize = [renderer.canvas.width, renderer.canvas.height];
         const env = stage.environment;
+        this.stageEnv = env;
+        this.stage = stage;
+        this.ddgi = stage.ddgi;
 
         this.depthTexture = renderer.device.createTexture({
             size: [renderer.canvas.width, renderer.canvas.height],
@@ -217,6 +225,12 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 { binding: 12, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float", viewDimension: "cube" } },
                 { binding: 13, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
                 { binding: 14, visibility: GPUShaderStage.COMPUTE, sampler: {} },
+                // DDGI textures
+                { binding: 15, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },  // irradiance atlas
+                { binding: 16, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },  // visibility atlas
+                { binding: 17, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },       // ddgi uniforms
+                { binding: 18, visibility: GPUShaderStage.COMPUTE, sampler: {} },                       // ddgi sampler
+                { binding: 19, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },       // sun light
             ]
         });
 
@@ -304,6 +318,11 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 { binding: 12, resource: env.prefilteredMapView },
                 { binding: 13, resource: env.brdfLutView },
                 { binding: 14, resource: env.envSampler },
+                // DDGI
+                { binding: 15, resource: this.ddgi.getCurrentIrradianceView() },
+                { binding: 16, resource: this.ddgi.getCurrentVisibilityView() },
+                { binding: 17, resource: { buffer: this.ddgi.ddgiUniformBuffer } },
+                { binding: 18, resource: this.ddgi.ddgiSampler },
             ]
         });
 
@@ -477,6 +496,42 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             shaders.constants.numClustersZ
         );
         cullingComputePass.end();
+
+        // DDGI update (after geometry, before shading)
+        this.ddgi.update(encoder, {
+            depth: this.depthTextureView,
+            normal: this.geometryNormalDeviceTextureView,
+            albedo: this.geometryAlbedoDeviceTextureView,
+            position: this.geometryPositionDeviceTextureView,
+        }, this.stage.sunLightBuffer);
+
+        // Recreate shading bind group to pick up current DDGI atlas (ping-pong)
+        this.shadingBindGroup = renderer.device.createBindGroup({
+            label: "shading bind group",
+            layout: this.shadingBindGroupLayout,
+            entries: [
+                { binding: 0, resource: { buffer: this.camera.uniformsBuffer }},
+                { binding: 1, resource: { buffer: this.lights.lightSetStorageBuffer }},
+                { binding: 2, resource: { buffer: this.tileOffsetsDeviceBuffer }},
+                { binding: 3, resource: { buffer: this.globalLightIndicesDeviceBuffer }},
+                { binding: 4, resource: { buffer: this.clusterSetDeviceBuffer }},
+                { binding: 5, resource: this.geometryAlbedoDeviceTextureView },
+                { binding: 6, resource: this.geometryNormalDeviceTextureView },
+                { binding: 7, resource: this.geometryPositionDeviceTextureView },
+                { binding: 8, resource: this.geometrySpecularDeviceTextureView },
+                { binding: 9, resource: this.depthTextureView},
+                { binding: 10, resource: this.shadingOutputDeviceTextureView },
+                { binding: 11, resource: this.stageEnv.irradianceMapView },
+                { binding: 12, resource: this.stageEnv.prefilteredMapView },
+                { binding: 13, resource: this.stageEnv.brdfLutView },
+                { binding: 14, resource: this.stageEnv.envSampler },
+                { binding: 15, resource: this.ddgi.getCurrentIrradianceView() },
+                { binding: 16, resource: this.ddgi.getCurrentVisibilityView() },
+                { binding: 17, resource: { buffer: this.ddgi.ddgiUniformBuffer } },
+                { binding: 18, resource: this.ddgi.ddgiSampler },
+                { binding: 19, resource: { buffer: this.stage.sunLightBuffer } },
+            ]
+        });
 
         // Deferred shading compute pass
         const shadingComputePass = encoder.beginComputePass();

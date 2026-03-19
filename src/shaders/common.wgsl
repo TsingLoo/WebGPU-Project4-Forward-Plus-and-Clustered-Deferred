@@ -133,3 +133,143 @@ fn calculateLightContrib(light: Light, posWorld: vec3f, nor: vec3f) -> vec3f {
     let lambert = max(dot(nor, normalize(vecToLight)), 0.f);
     return light.color * lambert * rangeAttenuation(distToLight);
 }
+
+// ============================
+// Directional Sun Light
+// ============================
+struct SunLight {
+    direction: vec4f,   // xyz = direction TO light (normalized), w = intensity
+    color: vec4f,       // rgb = color, a = enabled (0 or 1)
+}
+
+fn calculateSunLightPBR(
+    sun: SunLight,
+    posWorld: vec3f,
+    N: vec3f,
+    V: vec3f,
+    albedo: vec3f,
+    metallic: f32,
+    roughness: f32
+) -> vec3f {
+    if (sun.color.a < 0.5) { return vec3f(0.0); }
+
+    let L = normalize(sun.direction.xyz);
+    let H = normalize(V + L);
+    let intensity = sun.direction.w;
+    let radiance = sun.color.rgb * intensity;
+
+    let F0 = mix(vec3f(0.04), albedo, metallic);
+    let NdotV = max(dot(N, V), 0.0);
+
+    let NDF = distributionGGX(N, H, roughness);
+    let G = geometrySmith(N, V, L, roughness);
+    let F = fresnelSchlick(max(dot(H, V), 0.0), F0);
+
+    let numerator = NDF * G * F;
+    let denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
+    let specular = numerator / denominator;
+
+    let kS = F;
+    let kD = (vec3f(1.0) - kS) * (1.0 - metallic);
+
+    let NdotL = max(dot(N, L), 0.0);
+    return (kD * albedo / PI + specular) * radiance * NdotL;
+}
+
+// ============================
+// DDGI
+// ============================
+
+struct DDGIUniforms {
+    grid_count: vec4i,       // x, y, z, total
+    grid_min: vec4f,         // world-space min corner
+    grid_max: vec4f,         // world-space max corner
+    grid_spacing: vec4f,     // spacing per axis, w = rays per probe
+    irradiance_texel_size: vec4f, // texel_dim, texel_dim_with_border, atlas_width, atlas_height
+    visibility_texel_size: vec4f, // texel_dim, texel_dim_with_border, atlas_width, atlas_height
+    hysteresis: vec4f,       // irradiance_hysteresis, visibility_hysteresis, normal_bias, view_bias
+    ddgi_enabled: vec4f,     // x = enabled (0 or 1), y = debug_mode (0=off,1=irr,2=vis)
+}
+
+// Octahedral encoding: map direction to [0,1]^2
+fn octEncode(n: vec3f) -> vec2f {
+    let sum = abs(n.x) + abs(n.y) + abs(n.z);
+    var oct = vec2f(n.x, n.y) / sum;
+    if (n.z < 0.0) {
+        let signs = vec2f(
+            select(-1.0, 1.0, oct.x >= 0.0),
+            select(-1.0, 1.0, oct.y >= 0.0)
+        );
+        oct = (1.0 - abs(vec2f(oct.y, oct.x))) * signs;
+    }
+    return oct * 0.5 + 0.5;
+}
+
+// Octahedral decoding: map [0,1]^2 to direction
+fn octDecode(uv: vec2f) -> vec3f {
+    var f = uv * 2.0 - 1.0;
+    var n = vec3f(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+    if (n.z < 0.0) {
+        let signs = vec2f(
+            select(-1.0, 1.0, n.x >= 0.0),
+            select(-1.0, 1.0, n.y >= 0.0)
+        );
+        let xy = (1.0 - abs(vec2f(n.y, n.x))) * signs;
+        n = vec3f(xy.x, xy.y, n.z);
+    }
+    return normalize(n);
+}
+
+// Get world-space position of a probe given its 3D grid index
+fn ddgiProbePosition(gridIdx: vec3i, ddgi: DDGIUniforms) -> vec3f {
+    return ddgi.grid_min.xyz + vec3f(gridIdx) * ddgi.grid_spacing.xyz;
+}
+
+// Get the texel coordinate in the irradiance atlas for a probe index and octahedral UV
+fn ddgiIrradianceTexelCoord(probeIdx: i32, octUV: vec2f, ddgi: DDGIUniforms) -> vec2f {
+    let texelDim = i32(ddgi.irradiance_texel_size.x);      // 8
+    let texelDimBorder = i32(ddgi.irradiance_texel_size.y); // 10 (8+2)
+    let atlasWidth = ddgi.irradiance_texel_size.z;
+    let atlasHeight = ddgi.irradiance_texel_size.w;
+
+    let probesPerRow = i32(ddgi.grid_count.x);
+    let probeRow = probeIdx / probesPerRow;
+    let probeCol = probeIdx % probesPerRow;
+
+    let cornerX = f32(probeCol * texelDimBorder + 1); // +1 for border
+    let cornerY = f32(probeRow * texelDimBorder + 1);
+
+    // UV within probe texel region
+    let texelX = cornerX + octUV.x * f32(texelDim - 1);
+    let texelY = cornerY + octUV.y * f32(texelDim - 1);
+
+    return vec2f(texelX / atlasWidth, texelY / atlasHeight);
+}
+
+// Get the texel coordinate in the visibility atlas for a probe index and octahedral UV
+fn ddgiVisibilityTexelCoord(probeIdx: i32, octUV: vec2f, ddgi: DDGIUniforms) -> vec2f {
+    let texelDim = i32(ddgi.visibility_texel_size.x);       // 16
+    let texelDimBorder = i32(ddgi.visibility_texel_size.y);  // 18 (16+2)
+    let atlasWidth = ddgi.visibility_texel_size.z;
+    let atlasHeight = ddgi.visibility_texel_size.w;
+
+    let probesPerRow = i32(ddgi.grid_count.x);
+    let probeRow = probeIdx / probesPerRow;
+    let probeCol = probeIdx % probesPerRow;
+
+    let cornerX = f32(probeCol * texelDimBorder + 1);
+    let cornerY = f32(probeRow * texelDimBorder + 1);
+
+    let texelX = cornerX + octUV.x * f32(texelDim - 1);
+    let texelY = cornerY + octUV.y * f32(texelDim - 1);
+
+    return vec2f(texelX / atlasWidth, texelY / atlasHeight);
+}
+
+// Flatten 3D grid index to linear probe index
+fn ddgiProbeLinearIndex(gridIdx: vec3i, ddgi: DDGIUniforms) -> i32 {
+    return gridIdx.z * ddgi.grid_count.x * ddgi.grid_count.y
+         + gridIdx.y * ddgi.grid_count.x
+         + gridIdx.x;
+}
+

@@ -386,4 +386,41 @@ const renderModes = { naive: 'naive', forwardPlus: 'forward+', clusteredDeferred
 let renderModeController = gui.add({ mode: renderModes.forwardPlus }, 'mode', renderModes);
 renderModeController.onChange(setRenderer);
 
+// DDGI controls
+const ddgiFolder = gui.addFolder('DDGI');
+ddgiFolder.add(stage.ddgi, 'enabled').name('DDGI Enabled').onChange(() => {
+    stage.ddgi.updateUniforms();
+});
+ddgiFolder.add(stage.ddgi, 'irradianceHysteresis', 0.8, 0.999).step(0.001).name('Irr Hysteresis').onChange(() => {
+    stage.ddgi.updateUniforms();
+});
+ddgiFolder.add(stage.ddgi, 'normalBias', 0.0, 1.0).step(0.01).name('Normal Bias').onChange(() => {
+    stage.ddgi.updateUniforms();
+});
+ddgiFolder.open();
+
+// Sun Light controls
+const sunFolder = gui.addFolder('Sun Light');
+sunFolder.add(stage, 'sunEnabled').name('Enabled').onChange(() => {
+    stage.updateSunLight();
+});
+sunFolder.add(stage, 'sunIntensity', 0.0, 10.0).step(0.1).name('Intensity').onChange(() => {
+    stage.updateSunLight();
+});
+const sunDirProxy = { x: stage.sunDirection[0], y: stage.sunDirection[1], z: stage.sunDirection[2] };
+sunFolder.add(sunDirProxy, 'x', -1, 1).step(0.01).name('Dir X').onChange(() => {
+    stage.sunDirection = [sunDirProxy.x, sunDirProxy.y, sunDirProxy.z];
+    stage.updateSunLight();
+});
+sunFolder.add(sunDirProxy, 'y', -1, 1).step(0.01).name('Dir Y').onChange(() => {
+    stage.sunDirection = [sunDirProxy.x, sunDirProxy.y, sunDirProxy.z];
+    stage.updateSunLight();
+});
+sunFolder.add(sunDirProxy, 'z', -1, 1).step(0.01).name('Dir Z').onChange(() => {
+    stage.sunDirection = [sunDirProxy.x, sunDirProxy.y, sunDirProxy.z];
+    stage.updateSunLight();
+});
+sunFolder.open();
+
 setRenderer(renderModeController.getValue());
+

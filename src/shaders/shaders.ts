@@ -29,6 +29,12 @@ import prefilterEnvmapRaw from './prefilter_envmap.cs.wgsl?raw';
 import brdfLutRaw from './brdf_lut.cs.wgsl?raw';
 import equirectangularToCubemapRaw from './equirectangular_to_cubemap.cs.wgsl?raw';
 
+// DDGI shaders
+import ddgiProbeTraceRaw from './ddgi_probe_trace.cs.wgsl?raw';
+import ddgiIrradianceUpdateRaw from './ddgi_irradiance_update.cs.wgsl?raw';
+import ddgiVisibilityUpdateRaw from './ddgi_visibility_update.cs.wgsl?raw';
+import ddgiBorderUpdateRaw from './ddgi_border_update.cs.wgsl?raw';
+
 // Skybox shaders
 import skyboxVertRaw from './skybox.vs.wgsl?raw';
 import skyboxFragRaw from './skybox.fs.wgsl?raw';
@@ -60,7 +66,15 @@ export const constants = {
 
     moveLightsWorkgroupSize: 128,
 
-    lightRadius: 2
+    lightRadius: 2,
+
+    // DDGI
+    ddgiProbeGridX: 8,
+    ddgiProbeGridY: 4,
+    ddgiProbeGridZ: 8,
+    ddgiRaysPerProbe: 64,
+    ddgiIrradianceTexels: 8,
+    ddgiVisibilityTexels: 16,
 };
 
 // =================================
@@ -79,7 +93,11 @@ function evalShaderRaw(raw: string) {
     .replace(/\$\{ambientG\}/g, constants.ambientG.toString())
     .replace(/\$\{ambientB\}/g, constants.ambientB.toString())
 
-    .replace(/\$\{lightRadius\}/g, constants.lightRadius.toString());
+    .replace(/\$\{lightRadius\}/g, constants.lightRadius.toString())
+
+    .replace(/\$\{ddgiRaysPerProbe\}/g, constants.ddgiRaysPerProbe.toString())
+    .replace(/\$\{ddgiIrradianceTexels\}/g, constants.ddgiIrradianceTexels.toString())
+    .replace(/\$\{ddgiVisibilityTexels\}/g, constants.ddgiVisibilityTexels.toString());
 }
 
 const commonSrc: string = evalShaderRaw(commonRaw);
@@ -116,3 +134,9 @@ export const equirectangularToCubemapSrc = equirectangularToCubemapRaw;
 // Skybox shaders (need common for CameraUniforms)
 export const skyboxVertSrc: string = processShaderRaw(skyboxVertRaw);
 export const skyboxFragSrc: string = processShaderRaw(skyboxFragRaw);
+
+// DDGI shaders (need common for structs/utilities)
+export const ddgiProbeTraceSrc: string = processShaderRaw(ddgiProbeTraceRaw);
+export const ddgiIrradianceUpdateSrc: string = processShaderRaw(ddgiIrradianceUpdateRaw);
+export const ddgiVisibilityUpdateSrc: string = processShaderRaw(ddgiVisibilityUpdateRaw);
+export const ddgiBorderUpdateSrc: string = ddgiBorderUpdateRaw; // standalone, no common
