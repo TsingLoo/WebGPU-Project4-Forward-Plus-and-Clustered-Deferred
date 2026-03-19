@@ -126,7 +126,7 @@ fn main(
                 }
 
                 // Add ambient term so shadowed areas still contribute some bounce
-                hitLighting += vec3f(0.3);
+                hitLighting += vec3f(ddgi.ddgi_enabled.z);
 
                 hitRadiance = hitAlbedo * hitLighting;
                 hitDist = hitDistCandidate;

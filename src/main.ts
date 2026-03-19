@@ -103,78 +103,46 @@ const avgStats = {
 };
 
 const gui = new GUI();
-gui.add(avgStats, 'avgFPS_20s').name('Avg FPS (20s)').listen();
+
+// =========== Render Mode (top-level) ===========
+const renderModes = { naive: 'naive', forwardPlus: 'forward+', clusteredDeferred: 'clustered deferred' };
+let renderModeController = gui.add({ mode: renderModes.forwardPlus }, 'mode', renderModes);
+
+gui.add(avgStats, 'avgFPS_20s').name('Avg FPS (8s)').listen();
+
+// =========== Point Lights ===========
+const lightsFolder = gui.addFolder('Point Lights');
 
 const desiredMobileOptions = [5, 10, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1250, 1450, 1500];
-
 const desiredPCOptions = [1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900, 3000, 3200, 3400, 3600, 3800, 4000, 4200, 4400, 4600, 4800, 5000, 6000, 7000, 8000];
-
-let desiredOptions = isMobileDevice? desiredMobileOptions : desiredPCOptions;
-
-const safeOptions = desiredOptions.filter(
-    count => count <= Lights.maxNumLights
-);
-
-
+let desiredOptions = isMobileDevice ? desiredMobileOptions : desiredPCOptions;
+const safeOptions = desiredOptions.filter(count => count <= Lights.maxNumLights);
 safeOptions.push(desiredOptions[3]);
-safeOptions.sort((a, b) => a - b); 
+safeOptions.sort((a, b) => a - b);
 
+// Toggle: saves/restores numLights
+let savedNumLights = lights.numLights;
+const pointLightToggle = { enabled: true };
 
-const lightNumSlider = gui.add(lights, 'numLights').min(1).max(Lights.maxNumLights).step(1).onChange(() => {
+const lightNumSlider = lightsFolder.add(lights, 'numLights').min(1).max(Lights.maxNumLights).step(1).name('Count').onChange(() => {
+    if (pointLightToggle.enabled) savedNumLights = lights.numLights;
     lights.updateLightSetUniformNumLights();
 });
 
-
-const lightCountController = gui.add(lights, 'numLights', safeOptions).onChange(() => {
-    lights.updateLightSetUniformNumLights();
-});
-
-const benchmarkController = {
-    runBenchmark: async () => {
-
-        resultsElement.innerHTML = '--- Benchmark Begin ---<br>';
-        resultsElement.style.display = 'block';
-
-        console.log("--- Benchmark Begin ---");
-        const allResults: string[] = [];
-        
-        for (const lightCount of safeOptions) {
-            
-            lights.numLights = lightCount;
-            lights.updateLightSetUniformNumLights();
-            lightCountController.updateDisplay();
-            lightNumSlider.updateDisplay();
-
-            avgStats.avgFPS_20s = `Idling (${lightCount} lights)...`;
-            await sleep(restTime);
-            
-            avgStats.reset();
-            
-            while (avgStats.collecting) {
-                await sleep(200);
-            }
-            
-            const resultString = `${lightCount} lights: ${avgStats.avgFPS_20s} FPS`;
-            allResults.push(resultString);
-            console.log(resultString);
-            
-            resultsElement.innerHTML += resultString + '<br>';
-            resultsElement.scrollTop = resultsElement.scrollHeight;
-
-            await sleep(500);
-        }
-        
-        avgStats.avgFPS_20s = "Finished!";
-        console.log("--- Benchmark End ---");
-        console.log(allResults.join('\n'));
-
-        resultsElement.innerHTML += '--- Benchmark End ---<br>';
-        resultsElement.scrollTop = resultsElement.scrollHeight;
+lightsFolder.add(pointLightToggle, 'enabled').name('Enabled').onChange((val: boolean) => {
+    if (val) {
+        lights.numLights = savedNumLights;
+    } else {
+        savedNumLights = lights.numLights;
+        lights.numLights = 0;
     }
-};
+    lights.updateLightSetUniformNumLights();
+    lightNumSlider.updateDisplay();
+});
 
-gui.add(benchmarkController, 'runBenchmark').name('Run Full Benchmark');
+lightsFolder.open();
 
+// =========== Stage ===========
 const stage = new Stage(scene, lights, camera, stats, environment);
 
 var renderer: Renderer | undefined;
@@ -195,7 +163,53 @@ function setRenderer(mode: string) {
     }
 }
 
-// Helper: parse HDR file and return RGBA Float32Array + dimensions
+renderModeController.onChange(setRenderer);
+
+// =========== DDGI ===========
+const ddgiFolder = gui.addFolder('DDGI');
+ddgiFolder.add(stage.ddgi, 'enabled').name('Enabled').onChange(() => {
+    stage.ddgi.updateUniforms();
+});
+ddgiFolder.add(stage.ddgi, 'irradianceHysteresis', 0.0, 0.999).step(0.001).name('Irr Hysteresis').onChange(() => {
+    stage.ddgi.updateUniforms();
+});
+ddgiFolder.add(stage.ddgi, 'visibilityHysteresis', 0.0, 0.999).step(0.001).name('Vis Hysteresis').onChange(() => {
+    stage.ddgi.updateUniforms();
+});
+ddgiFolder.add(stage.ddgi, 'normalBias', 0.0, 2.0).step(0.01).name('Normal Bias').onChange(() => {
+    stage.ddgi.updateUniforms();
+});
+ddgiFolder.add(stage.ddgi, 'viewBias', 0.0, 2.0).step(0.01).name('View Bias').onChange(() => {
+    stage.ddgi.updateUniforms();
+});
+ddgiFolder.add(stage.ddgi, 'probeTraceAmbient', 0.0, 1.0).step(0.01).name('Probe Ambient').onChange(() => {
+    stage.ddgi.updateUniforms();
+});
+ddgiFolder.add(stage.ddgi, 'debugMode', { 'Off': 0, 'Raw Atlas': 1, 'Decoded Irr': 2, 'IBL Only': 3, 'Mapped Normal': 4, 'Vertex Normal': 5, 'Tangent': 6, 'NdotL': 7, 'Probe Grid': 8 }).name('Debug View').onChange(() => {
+    stage.ddgi.updateUniforms();
+});
+
+// Grid bounds controls
+const gridBoundsFolder = ddgiFolder.addFolder('Grid Bounds');
+const gridProxy = {
+    minX: stage.ddgi.gridMin[0], minY: stage.ddgi.gridMin[1], minZ: stage.ddgi.gridMin[2],
+    maxX: stage.ddgi.gridMax[0], maxY: stage.ddgi.gridMax[1], maxZ: stage.ddgi.gridMax[2],
+};
+const updateGridBounds = () => {
+    stage.ddgi.gridMin = [gridProxy.minX, gridProxy.minY, gridProxy.minZ];
+    stage.ddgi.gridMax = [gridProxy.maxX, gridProxy.maxY, gridProxy.maxZ];
+    stage.ddgi.updateUniforms();
+};
+gridBoundsFolder.add(gridProxy, 'minX', -30, 0).step(0.5).name('Min X').onChange(updateGridBounds);
+gridBoundsFolder.add(gridProxy, 'minY', -5, 5).step(0.5).name('Min Y').onChange(updateGridBounds);
+gridBoundsFolder.add(gridProxy, 'minZ', -20, 0).step(0.5).name('Min Z').onChange(updateGridBounds);
+gridBoundsFolder.add(gridProxy, 'maxX', 0, 30).step(0.5).name('Max X').onChange(updateGridBounds);
+gridBoundsFolder.add(gridProxy, 'maxY', 3, 20).step(0.5).name('Max Y').onChange(updateGridBounds);
+gridBoundsFolder.add(gridProxy, 'maxZ', 0, 20).step(0.5).name('Max Z').onChange(updateGridBounds);
+
+ddgiFolder.open();
+
+// =========== Helper functions (HDR / EXR parsing) ===========
 function parseHdrFile(buffer: ArrayBuffer): { rgbaData: Float32Array, width: number, height: number } {
     const parsedLayout = parseHdr(buffer);
 
@@ -210,7 +224,6 @@ function parseHdrFile(buffer: ArrayBuffer): { rgbaData: Float32Array, width: num
         throw new Error("Invalid HDR file format");
     }
 
-    // parse-hdr returns RGBA (4 channels) already
     const rgbaData = new Float32Array(width * height * 4);
     if (data.length === width * height * 3) {
         for (let i = 0; i < width * height; i++) {
@@ -228,7 +241,6 @@ function parseHdrFile(buffer: ArrayBuffer): { rgbaData: Float32Array, width: num
     return { rgbaData, width, height };
 }
 
-// Helper: parse EXR file and return RGBA Float32Array + dimensions
 function parseExrFile(buffer: ArrayBuffer): { rgbaData: Float32Array, width: number, height: number } {
     const FloatType = 1015;
     const RGBAFormat = 1023;
@@ -240,11 +252,9 @@ function parseExrFile(buffer: ArrayBuffer): { rgbaData: Float32Array, width: num
     let rgbaData: Float32Array;
 
     if (format === RGBAFormat) {
-        // Data is RGBA, 4 floats per pixel
         if (data.length === numPixels * 4) {
             rgbaData = data as Float32Array;
         } else {
-            // Data might be RGB (3 floats per pixel) even with RGBA format flag
             const channels = data.length / numPixels;
             rgbaData = new Float32Array(numPixels * 4);
             if (channels === 3) {
@@ -259,18 +269,14 @@ function parseExrFile(buffer: ArrayBuffer): { rgbaData: Float32Array, width: num
             }
         }
     } else {
-        // Single channel or other format
         throw new Error(`Unsupported EXR format code: ${format}. Expected RGBA (1023).`);
     }
 
-    // parse-exr outputs rows bottom-to-top (OpenGL convention)
-    // Flip to top-to-bottom to match .hdr convention and our shader's V-flip
     const floatsPerRow = width * 4;
     const tempRow = new Float32Array(floatsPerRow);
     for (let y = 0; y < Math.floor(height / 2); y++) {
         const topOffset = y * floatsPerRow;
         const bottomOffset = (height - 1 - y) * floatsPerRow;
-        // Swap rows
         tempRow.set(rgbaData.subarray(topOffset, topOffset + floatsPerRow));
         rgbaData.set(rgbaData.subarray(bottomOffset, bottomOffset + floatsPerRow), topOffset);
         rgbaData.set(tempRow, bottomOffset);
@@ -279,6 +285,48 @@ function parseExrFile(buffer: ArrayBuffer): { rgbaData: Float32Array, width: num
     return { rgbaData, width, height };
 }
 
+// =========== Tools ===========
+const toolsFolder = gui.addFolder('Tools');
+
+// -- Benchmark --
+const benchmarkController = {
+    runBenchmark: async () => {
+        resultsElement.innerHTML = '--- Benchmark Begin ---<br>';
+        resultsElement.style.display = 'block';
+        console.log("--- Benchmark Begin ---");
+        const allResults: string[] = [];
+
+        for (const lightCount of safeOptions) {
+            lights.numLights = lightCount;
+            lights.updateLightSetUniformNumLights();
+            lightNumSlider.updateDisplay();
+
+            avgStats.avgFPS_20s = `Idling (${lightCount} lights)...`;
+            await sleep(restTime);
+            avgStats.reset();
+
+            while (avgStats.collecting) {
+                await sleep(200);
+            }
+
+            const resultString = `${lightCount} lights: ${avgStats.avgFPS_20s} FPS`;
+            allResults.push(resultString);
+            console.log(resultString);
+            resultsElement.innerHTML += resultString + '<br>';
+            resultsElement.scrollTop = resultsElement.scrollHeight;
+            await sleep(500);
+        }
+
+        avgStats.avgFPS_20s = "Finished!";
+        console.log("--- Benchmark End ---");
+        console.log(allResults.join('\n'));
+        resultsElement.innerHTML += '--- Benchmark End ---<br>';
+        resultsElement.scrollTop = resultsElement.scrollHeight;
+    }
+};
+toolsFolder.add(benchmarkController, 'runBenchmark').name('Run Full Benchmark');
+
+// -- HDRI upload --
 const fileInput = document.createElement('input');
 fileInput.type = 'file';
 fileInput.accept = '.hdr,.exr';
@@ -307,7 +355,6 @@ fileInput.addEventListener('change', async (event) => {
         }
 
         console.log(`[HDRI] Loaded ${file.name}: ${width}x${height}, data length: ${rgbaData.length}`);
-
         await stage.environment.loadHDRI(rgbaData, width, height);
     } catch (e) {
         console.error("Failed to load HDRI:", e);
@@ -316,18 +363,13 @@ fileInput.addEventListener('change', async (event) => {
 });
 
 const uploadController = {
-    uploadHDRI: () => {
-        fileInput.click();
-    },
-    resetHDRI: () => {
-        stage.environment.clearHDRI();
-    }
+    uploadHDRI: () => { fileInput.click(); },
+    resetHDRI: () => { stage.environment.clearHDRI(); }
 };
+toolsFolder.add(uploadController, 'uploadHDRI').name('Upload HDRI (.hdr/.exr)');
+toolsFolder.add(uploadController, 'resetHDRI').name('Clear HDRI');
 
-gui.add(uploadController, 'uploadHDRI').name('Upload HDRI (.hdr/.exr)');
-gui.add(uploadController, 'resetHDRI').name('Clear HDRI');
-
-// --- Model upload (.gltf / .glb) ---
+// -- Model upload --
 const modelFileInput = document.createElement('input');
 modelFileInput.type = 'file';
 modelFileInput.accept = '.gltf,.glb';
@@ -346,24 +388,17 @@ modelFileInput.addEventListener('change', async (event) => {
         }
 
         console.log(`[Model] Loading ${file.name}...`);
-
-        // Read file as ArrayBuffer and parse directly
         const buffer = await file.arrayBuffer();
 
-        // Replace the current scene
         const newScene = new Scene();
         await newScene.loadGltfBuffer(buffer);
-
-        // Update stage with new scene
         stage.scene = newScene;
 
         // Disable random point lights (designed for Sponza) to avoid color artifacts
         lights.numLights = 0;
         lights.updateLightSetUniformNumLights();
         lightNumSlider.updateDisplay();
-        lightCountController.updateDisplay();
 
-        // Re-create renderer to pick up the new scene
         if (renderModeController) {
             setRenderer(renderModeController.getValue());
         }
@@ -374,37 +409,13 @@ modelFileInput.addEventListener('change', async (event) => {
         alert("Failed to load model: " + String(e));
     }
 
-    // Reset the input so the same file can be re-selected
     modelFileInput.value = '';
 });
 
 const modelUploadController = {
-    loadModel: () => {
-        modelFileInput.click();
-    }
+    loadModel: () => { modelFileInput.click(); }
 };
-
-gui.add(modelUploadController, 'loadModel').name('Load Model (.gltf/.glb)');
-
-const renderModes = { naive: 'naive', forwardPlus: 'forward+', clusteredDeferred: 'clustered deferred' };
-let renderModeController = gui.add({ mode: renderModes.forwardPlus }, 'mode', renderModes);
-renderModeController.onChange(setRenderer);
-
-// DDGI controls
-const ddgiFolder = gui.addFolder('DDGI');
-ddgiFolder.add(stage.ddgi, 'enabled').name('DDGI Enabled').onChange(() => {
-    stage.ddgi.updateUniforms();
-});
-ddgiFolder.add(stage.ddgi, 'irradianceHysteresis', 0.8, 0.999).step(0.001).name('Irr Hysteresis').onChange(() => {
-    stage.ddgi.updateUniforms();
-});
-ddgiFolder.add(stage.ddgi, 'normalBias', 0.0, 1.0).step(0.01).name('Normal Bias').onChange(() => {
-    stage.ddgi.updateUniforms();
-});
-ddgiFolder.add(stage.ddgi, 'debugMode', { 'Off': 0, 'Raw Atlas': 1, 'Decoded Irr': 2, 'IBL Only': 3, 'Mapped Normal': 4, 'Vertex Normal': 5, 'Tangent': 6, 'NdotL': 7, 'Probe Grid': 8 }).name('Debug View').onChange(() => {
-    stage.ddgi.updateUniforms();
-});
-ddgiFolder.open();
+toolsFolder.add(modelUploadController, 'loadModel').name('Load Model (.gltf/.glb)');
 
 // Sun Light controls
 const sunFolder = gui.addFolder('Sun Light');

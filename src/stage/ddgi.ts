@@ -28,14 +28,15 @@ export class DDGI {
     static readonly VIS_ATLAS_H = (DDGI.GRID_Y * DDGI.GRID_Z) * DDGI.VISIBILITY_WITH_BORDER;
 
     // World-space bounds (Sponza defaults)
-    gridMin: [number, number, number] = [-14, -1, -7];
-    gridMax: [number, number, number] = [14, 7, 7];
+    gridMin: [number, number, number] = [-14, 0, -7];
+    gridMax: [number, number, number] = [14, 12, 7];
 
     // Hysteresis
     irradianceHysteresis = 0.85;
     visibilityHysteresis = 0.97;
     normalBias = 0.25;
     viewBias = 0.1;
+    probeTraceAmbient = 0.3;
 
     enabled = true;
     debugMode = 0; // 0=off, 1=irradiance, 2=visibility
@@ -267,7 +268,7 @@ export class DDGI {
         // ddgi_enabled: vec4f
         f32View[28] = this.enabled ? 1.0 : 0.0;
         f32View[29] = this.debugMode;
-        f32View[30] = 0;
+        f32View[30] = this.probeTraceAmbient;
         f32View[31] = 0;
 
         device.queue.writeBuffer(this.ddgiUniformBuffer, 0, data);

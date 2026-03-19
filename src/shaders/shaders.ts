@@ -79,7 +79,7 @@ export const constants = {
 
     // DDGI
     ddgiProbeGridX: 8,
-    ddgiProbeGridY: 4,
+    ddgiProbeGridY: 8,
     ddgiProbeGridZ: 8,
     ddgiRaysPerProbe: 64,
     ddgiIrradianceTexels: 8,
