@@ -18,38 +18,48 @@ import { Camera } from './camera';
  *   5. Sampling: fragment shader reads page table + physical atlas
  */
 export class VSM {
-    // --- Configuration ---
-    static readonly PAGE_SIZE = 128;           // texels per page axis
-    static readonly PHYS_ATLAS_SIZE = 4096;    // physical atlas texels per axis
-    static readonly PHYS_PAGES_PER_AXIS = VSM.PHYS_ATLAS_SIZE / VSM.PAGE_SIZE; // 32
-    static readonly MAX_PHYS_PAGES = VSM.PHYS_PAGES_PER_AXIS * VSM.PHYS_PAGES_PER_AXIS; // 1024
-    static readonly NUM_CLIPMAP_LEVELS = 6;
-    static readonly PAGES_PER_LEVEL_AXIS = 128; // virtual pages per level per axis
-    static readonly VIRTUAL_SIZE = VSM.PAGES_PER_LEVEL_AXIS * VSM.PAGE_SIZE; // 16384
+    // --- Configuration (adjustable at runtime via GUI) ---
+    pageSize: number = 128;              // texels per page axis
+    physAtlasSize: number = 4096;        // physical atlas texels per axis
+    numClipmapLevels: number = 6;
+    pagesPerLevelAxis: number = 128;     // virtual pages per level per axis
 
-    // Total virtual page count across all levels
-    static readonly TOTAL_VIRTUAL_PAGES = VSM.NUM_CLIPMAP_LEVELS * VSM.PAGES_PER_LEVEL_AXIS * VSM.PAGES_PER_LEVEL_AXIS;
+    // --- Derived (recomputed on config change) ---
+    get physPagesPerAxis(): number { return Math.floor(this.physAtlasSize / this.pageSize); }
+    get maxPhysPages(): number { return this.physPagesPerAxis * this.physPagesPerAxis; }
+    get virtualSize(): number { return this.pagesPerLevelAxis * this.pageSize; }
+    get totalVirtualPages(): number { return this.numClipmapLevels * this.pagesPerLevelAxis * this.pagesPerLevelAxis; }
+
+    // Static defaults for backward compatibility where static access is needed
+    static readonly PAGE_SIZE = 128;
+    static readonly PHYS_ATLAS_SIZE = 4096;
+    static readonly PHYS_PAGES_PER_AXIS = 32;
+    static readonly MAX_PHYS_PAGES = 1024;
+    static readonly NUM_CLIPMAP_LEVELS = 6;
+    static readonly PAGES_PER_LEVEL_AXIS = 128;
+    static readonly VIRTUAL_SIZE = 16384;
+    static readonly TOTAL_VIRTUAL_PAGES = 6 * 128 * 128;
 
     // --- GPU Resources ---
     // Physical depth atlas
-    physicalAtlas: GPUTexture;
-    physicalAtlasView: GPUTextureView;
-    shadowComparisonSampler: GPUSampler;
+    physicalAtlas!: GPUTexture;
+    physicalAtlasView!: GPUTextureView;
+    shadowComparisonSampler!: GPUSampler;
 
     // Page table: virtual page → physical page index (u32 per page)
-    pageTableBuffer: GPUBuffer;
+    pageTableBuffer!: GPUBuffer;
     // Page request flags: atomically written marks
-    pageRequestBuffer: GPUBuffer;
+    pageRequestBuffer!: GPUBuffer;
     // Allocation state: counter + debug info
-    allocStateBuffer: GPUBuffer;
+    allocStateBuffer!: GPUBuffer;
 
     // VSM uniform buffer: clipmap VP matrices + params
     // Layout: 6 × mat4x4f (384 bytes) + 4 × u32 params (16 bytes) + mat4x4f inv_view_proj (64 bytes) = 464 bytes
     // Padded to 480 for alignment
-    vsmUniformBuffer: GPUBuffer;
+    vsmUniformBuffer!: GPUBuffer;
 
     // Light VP buffer per clipmap level (for shadow rendering)
-    clipmapVPBuffers: GPUBuffer[];
+    clipmapVPBuffers!: GPUBuffer[];
 
     // --- Pipelines ---
     clearPipeline!: GPUComputePipeline;
@@ -72,11 +82,34 @@ export class VSM {
 
     constructor(camera: Camera) {
         this.camera = camera;
+        this.createGPUResources();
+        this.createComputePipelines();
+        this.createShadowPipeline();
+    }
 
+    /**
+     * Recreate all GPU resources after config change.
+     * Call this after modifying pageSize, physAtlasSize, numClipmapLevels, or pagesPerLevelAxis.
+     */
+    recreate() {
+        // Destroy old resources
+        this.physicalAtlas.destroy();
+        this.pageTableBuffer.destroy();
+        this.pageRequestBuffer.destroy();
+        this.allocStateBuffer.destroy();
+        this.vsmUniformBuffer.destroy();
+        for (const buf of this.clipmapVPBuffers) buf.destroy();
+
+        this.createGPUResources();
+        this.createComputePipelines();
+        this.createShadowPipeline();
+    }
+
+    private createGPUResources() {
         // Physical depth atlas
         this.physicalAtlas = device.createTexture({
             label: "VSM Physical Atlas",
-            size: [VSM.PHYS_ATLAS_SIZE, VSM.PHYS_ATLAS_SIZE],
+            size: [this.physAtlasSize, this.physAtlasSize],
             format: 'depth32float',
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
         });
@@ -93,14 +126,14 @@ export class VSM {
         // Page table buffer
         this.pageTableBuffer = device.createBuffer({
             label: "VSM Page Table",
-            size: VSM.TOTAL_VIRTUAL_PAGES * 4,
+            size: this.totalVirtualPages * 4,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         });
 
         // Page request flags
         this.pageRequestBuffer = device.createBuffer({
             label: "VSM Page Request Flags",
-            size: VSM.TOTAL_VIRTUAL_PAGES * 4,
+            size: this.totalVirtualPages * 4,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         });
 
@@ -121,17 +154,13 @@ export class VSM {
 
         // Per-clipmap-level VP buffer for shadow render pass
         this.clipmapVPBuffers = [];
-        for (let i = 0; i < VSM.NUM_CLIPMAP_LEVELS; i++) {
+        for (let i = 0; i < this.numClipmapLevels; i++) {
             this.clipmapVPBuffers.push(device.createBuffer({
                 label: `VSM Clipmap VP Level ${i}`,
                 size: 64,
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
             }));
         }
-
-        // Create pipelines
-        this.createComputePipelines();
-        this.createShadowPipeline();
     }
 
     private createComputePipelines() {
@@ -218,8 +247,8 @@ export class VSM {
                 format: 'depth32float',
                 depthWriteEnabled: true,
                 depthCompare: 'less',
-                depthBias: 2,
-                depthBiasSlopeScale: 1.5,
+                depthBias: 4,
+                depthBiasSlopeScale: 2.5,
             },
             vertex: {
                 module: device.createShaderModule({ label: "VSM Shadow VS", code: shaders.shadowVertSrc }),
@@ -246,25 +275,10 @@ export class VSM {
 
         const vpMatrices: Float32Array[] = [];
 
-        for (let level = 0; level < VSM.NUM_CLIPMAP_LEVELS; level++) {
+        for (let level = 0; level < this.numClipmapLevels; level++) {
             const radius = Math.pow(2, level + 4); // 16, 32, 64, 128, 256, 512
 
-            // Snap center to page-boundary to reduce shimmering
-            // The texel size at this level = (2*radius) / VIRTUAL_SIZE
-            const texelSize = (2 * radius) / VSM.VIRTUAL_SIZE;
-            const snappedCenter = [
-                Math.floor(cameraPos[0] / texelSize) * texelSize,
-                Math.floor(cameraPos[1] / texelSize) * texelSize,
-                Math.floor(cameraPos[2] / texelSize) * texelSize,
-            ];
-
-            // Light "eye" position — far enough back along light direction
-            const lightDist = radius * 2;
-            const eyeX = snappedCenter[0] + lightDir[0] * lightDist;
-            const eyeY = snappedCenter[1] + lightDir[1] * lightDist;
-            const eyeZ = snappedCenter[2] + lightDir[2] * lightDist;
-
-            // Forward direction (eye toward center)
+            // Forward direction (eye toward center) = -lightDir
             const fwd = [-lightDir[0], -lightDir[1], -lightDir[2]];
 
             // Up vector
@@ -288,6 +302,36 @@ export class VSM {
                 right[2] * fwd[0] - right[0] * fwd[2],
                 right[0] * fwd[1] - right[1] * fwd[0],
             ];
+
+            // ---- Snap in light-space to eliminate sub-texel jitter ----
+            // Project camera center into light-space (right/up axes)
+            const camDotRight = right[0] * cameraPos[0] + right[1] * cameraPos[1] + right[2] * cameraPos[2];
+            const camDotUp = up[0] * cameraPos[0] + up[1] * cameraPos[1] + up[2] * cameraPos[2];
+            const camDotFwd = fwd[0] * cameraPos[0] + fwd[1] * cameraPos[1] + fwd[2] * cameraPos[2];
+
+            // Each texel covers (2 * radius) / tilePixels world units
+            // With the square grid layout, each level renders to a tileSize × tileSize region
+            const gridCols = Math.ceil(Math.sqrt(this.numClipmapLevels));
+            const tilePixels = Math.floor(this.physAtlasSize / gridCols);
+            const texelWorldSize = (2 * radius) / tilePixels;
+
+            // Snap the light-space X/Y to texel boundaries
+            const snappedRight = Math.floor(camDotRight / texelWorldSize) * texelWorldSize;
+            const snappedUp = Math.floor(camDotUp / texelWorldSize) * texelWorldSize;
+
+            // Reconstruct snapped world center: project back from light-space
+            // snappedCenter = snappedRight * right + snappedUp * up + camDotFwd * fwd
+            const snappedCenter = [
+                snappedRight * right[0] + snappedUp * up[0] + camDotFwd * fwd[0],
+                snappedRight * right[1] + snappedUp * up[1] + camDotFwd * fwd[1],
+                snappedRight * right[2] + snappedUp * up[2] + camDotFwd * fwd[2],
+            ];
+
+            // Light "eye" position — far enough back along light direction
+            const lightDist = radius * 2;
+            const eyeX = snappedCenter[0] + lightDir[0] * lightDist;
+            const eyeY = snappedCenter[1] + lightDir[1] * lightDist;
+            const eyeZ = snappedCenter[2] + lightDir[2] * lightDist;
 
             // View matrix (column-major)
             const view = new Float32Array([
@@ -352,7 +396,7 @@ export class VSM {
         const u32 = new Uint32Array(data);
 
         // Clipmap VP matrices
-        for (let i = 0; i < VSM.NUM_CLIPMAP_LEVELS; i++) {
+        for (let i = 0; i < this.numClipmapLevels; i++) {
             f32.set(vpMatrices[i], i * 16);
         }
 
@@ -360,15 +404,15 @@ export class VSM {
         f32.set(invViewProj, 96); // offset 96 floats = 384 bytes
 
         // Params at offset 112 floats = 448 bytes
-        u32[112] = VSM.NUM_CLIPMAP_LEVELS;
-        u32[113] = VSM.PAGES_PER_LEVEL_AXIS;
-        u32[114] = VSM.PHYS_ATLAS_SIZE;
-        u32[115] = VSM.PHYS_PAGES_PER_AXIS;
+        u32[112] = this.numClipmapLevels;
+        u32[113] = this.pagesPerLevelAxis;
+        u32[114] = this.physAtlasSize;
+        u32[115] = this.physPagesPerAxis;
 
         device.queue.writeBuffer(this.vsmUniformBuffer, 0, data);
 
         // Also update per-level VP buffers for shadow rendering
-        for (let i = 0; i < VSM.NUM_CLIPMAP_LEVELS; i++) {
+        for (let i = 0; i < this.numClipmapLevels; i++) {
             device.queue.writeBuffer(this.clipmapVPBuffers[i], 0, vpMatrices[i].buffer);
         }
     }
@@ -397,7 +441,7 @@ export class VSM {
         const clearPass = encoder.beginComputePass({ label: "VSM Clear" });
         clearPass.setPipeline(this.clearPipeline);
         clearPass.setBindGroup(0, clearBG);
-        clearPass.dispatchWorkgroups(Math.ceil(VSM.TOTAL_VIRTUAL_PAGES / 256));
+        clearPass.dispatchWorkgroups(Math.ceil(this.totalVirtualPages / 256));
         clearPass.end();
 
         // 2. Mark pages pass
@@ -432,7 +476,7 @@ export class VSM {
         const allocPass = encoder.beginComputePass({ label: "VSM Allocate Pages" });
         allocPass.setPipeline(this.allocatePagesPipeline);
         allocPass.setBindGroup(0, allocBG);
-        allocPass.dispatchWorkgroups(Math.ceil(VSM.TOTAL_VIRTUAL_PAGES / 256));
+        allocPass.dispatchWorkgroups(Math.ceil(this.totalVirtualPages / 256));
         allocPass.end();
 
         // 4. Render shadow depth per clipmap level
@@ -460,12 +504,12 @@ export class VSM {
 
         shadowPass.setPipeline(this.shadowPipeline);
 
-        // Render each clipmap level with viewport/scissor mapped to atlas regions
-        // For v1: render all levels to the full atlas with the tightest level's VP
-        // Each level gets a band of rows in the atlas
-        const rowsPerLevel = Math.floor(VSM.PHYS_ATLAS_SIZE / VSM.NUM_CLIPMAP_LEVELS);
+        // Square grid layout: arrange levels as ceil(sqrt(N)) columns
+        // This ensures each level gets a square tile instead of a stretched band
+        const gridCols = Math.ceil(Math.sqrt(this.numClipmapLevels));
+        const tileSize = Math.floor(this.physAtlasSize / gridCols);
 
-        for (let level = 0; level < VSM.NUM_CLIPMAP_LEVELS; level++) {
+        for (let level = 0; level < this.numClipmapLevels; level++) {
             const bg = device.createBindGroup({
                 layout: this.shadowBindGroupLayout,
                 entries: [
@@ -474,10 +518,13 @@ export class VSM {
             });
             shadowPass.setBindGroup(0, bg);
 
-            // Set viewport for this level's band in the atlas
-            const yOffset = level * rowsPerLevel;
-            shadowPass.setViewport(0, yOffset, VSM.PHYS_ATLAS_SIZE, rowsPerLevel, 0, 1);
-            shadowPass.setScissorRect(0, yOffset, VSM.PHYS_ATLAS_SIZE, rowsPerLevel);
+            // Grid position for this level
+            const col = level % gridCols;
+            const row = Math.floor(level / gridCols);
+            const xOffset = col * tileSize;
+            const yOffset = row * tileSize;
+            shadowPass.setViewport(xOffset, yOffset, tileSize, tileSize, 0, 1);
+            shadowPass.setScissorRect(xOffset, yOffset, tileSize, tileSize);
 
             scene.iterate(
                 node => { shadowPass.setBindGroup(1, node.modelBindGroup); },

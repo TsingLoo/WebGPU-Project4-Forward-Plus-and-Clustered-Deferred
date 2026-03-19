@@ -422,5 +422,41 @@ sunFolder.add(sunDirProxy, 'z', -1, 1).step(0.01).name('Dir Z').onChange(() => {
 });
 sunFolder.open();
 
+// VSM Shadow controls
+const vsmFolder = gui.addFolder('Shadow (VSM)');
+const vsmProxy = {
+    physAtlasSize: stage.vsm.physAtlasSize,
+    pageSize: stage.vsm.pageSize,
+    numClipmapLevels: stage.vsm.numClipmapLevels,
+    pagesPerLevelAxis: stage.vsm.pagesPerLevelAxis,
+    // Display-only derived values
+    get virtualSize() { return stage.vsm.virtualSize; },
+    get maxPhysPages() { return stage.vsm.maxPhysPages; },
+};
+
+vsmFolder.add(vsmProxy, 'physAtlasSize', [1024, 2048, 4096, 8192]).name('Atlas Size').onChange((v: number) => {
+    stage.vsm.physAtlasSize = v;
+    stage.vsm.recreate();
+    stage.updateSunLight();
+});
+vsmFolder.add(vsmProxy, 'pageSize', [64, 128, 256]).name('Page Size').onChange((v: number) => {
+    stage.vsm.pageSize = v;
+    stage.vsm.recreate();
+    stage.updateSunLight();
+});
+vsmFolder.add(vsmProxy, 'numClipmapLevels', 1, 8).step(1).name('Clipmap Levels').onChange((v: number) => {
+    stage.vsm.numClipmapLevels = v;
+    stage.vsm.recreate();
+    stage.updateSunLight();
+});
+vsmFolder.add(vsmProxy, 'pagesPerLevelAxis', [32, 64, 128, 256]).name('Pages/Level Axis').onChange((v: number) => {
+    stage.vsm.pagesPerLevelAxis = v;
+    stage.vsm.recreate();
+    stage.updateSunLight();
+});
+vsmFolder.add(vsmProxy, 'virtualSize').name('Virtual Size (px)').listen();
+vsmFolder.add(vsmProxy, 'maxPhysPages').name('Max Phys Pages').listen();
+vsmFolder.open();
+
 setRenderer(renderModeController.getValue());
 

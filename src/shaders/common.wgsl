@@ -1,4 +1,4 @@
-// CHECKITOUT: code that you add here will be prepended to all shaders
+  // CHECKITOUT: code that you add here will be prepended to all shaders
 
 const PI = 3.14159265359;
 
@@ -192,6 +192,7 @@ struct VSMUniforms {
 }
 
 // Select best clipmap level based on world position → light NDC coverage
+// Uses an inset margin to prevent level oscillation at boundaries
 fn vsmSelectClipmapLevel(
     vsm: VSMUniforms,
     posWorld: vec3f,
@@ -200,18 +201,29 @@ fn vsmSelectClipmapLevel(
         let lightClip = vsm.clipmap_vp[level] * vec4f(posWorld, 1.0);
         let lightNDC = lightClip.xyz / lightClip.w;
 
-        // Check if within NDC bounds
-        if (lightNDC.x >= -1.0 && lightNDC.x <= 1.0 &&
-            lightNDC.y >= -1.0 && lightNDC.y <= 1.0 &&
-            lightNDC.z >= 0.0  && lightNDC.z <= 1.0) {
+        // Inset margin prevents flickering at level boundaries
+        let margin = 0.9;
+        if (lightNDC.x >= -margin && lightNDC.x <= margin &&
+            lightNDC.y >= -margin && lightNDC.y <= margin &&
+            lightNDC.z >= 0.0    && lightNDC.z <= 1.0) {
             return level;
         }
     }
     return vsm.clipmap_count; // No valid level
 }
 
+// Compute atlas tile offset and size for a clipmap level (square grid layout)
+fn vsmTileInfo(vsm: VSMUniforms, level: u32) -> vec3u {
+    // Returns (xOffset, yOffset, tileSize)
+    let gridCols = u32(ceil(sqrt(f32(vsm.clipmap_count))));
+    let tileSize = vsm.phys_atlas_size / gridCols;
+    let col = level % gridCols;
+    let row = level / gridCols;
+    return vec3u(col * tileSize, row * tileSize, tileSize);
+}
+
 // Calculate shadow using VSM (Virtual Shadow Map) with clipmap atlas
-// Uses textureLoad instead of textureSampleCompare to avoid uniform control flow restrictions
+// Uses textureLoad with bilinear PCF for smooth shadow edges
 fn calculateShadowVSM(
     physAtlas: texture_depth_2d,
     shadowSampler: sampler_comparison, // kept for API compat, unused
@@ -235,30 +247,59 @@ fn calculateShadowVSM(
     let uv = vec2f(lightNDC.x * 0.5 + 0.5, -lightNDC.y * 0.5 + 0.5);
     let depth = lightNDC.z;
 
-    // Direct atlas UV: each clipmap level gets a horizontal band
-    let atlasDims = textureDimensions(physAtlas, 0);
-    let atlasW = f32(atlasDims.x);
-    let atlasH = f32(atlasDims.y);
-    let rowsPerLevel = atlasDims.y / max(vsm.clipmap_count, 1u);
-    let yOffset = safeLevel * rowsPerLevel;
+    // Square grid layout: each level gets a square tile
+    let tile = vsmTileInfo(vsm, safeLevel);
+    let tileX = f32(tile.x);
+    let tileY = f32(tile.y);
+    let tileSz = f32(tile.z);
 
-    // Convert UV to texel coordinates
-    let texelX = i32(clamp(uv.x * atlasW, 0.0, atlasW - 1.0));
-    let texelY = i32(clamp(f32(yOffset) + uv.y * f32(rowsPerLevel), 0.0, atlasH - 1.0));
+    // Sub-texel coordinates for bilinear weighting
+    let texCoordX = tileX + uv.x * tileSz - 0.5;
+    let texCoordY = tileY + uv.y * tileSz - 0.5;
+    let baseX = i32(floor(texCoordX));
+    let baseY = i32(floor(texCoordY));
+    let fracX = texCoordX - floor(texCoordX);
+    let fracY = texCoordY - floor(texCoordY);
+
     let safeDepth = clamp(depth, 0.0, 1.0);
 
-    // 3x3 PCF using textureLoad (no uniform control flow requirement)
+    // Tile boundary clamps to prevent PCF bleeding into adjacent tiles
+    let tileMinX = i32(tile.x);
+    let tileMinY = i32(tile.y);
+    let tileMaxX = i32(tile.x + tile.z) - 1;
+    let tileMaxY = i32(tile.y + tile.z) - 1;
+
+    // Bilinear-interpolated PCF: 5×5 kernel with Gaussian weighting
     var shadow = 0.0;
-    for (var dy = -1; dy <= 1; dy++) {
-        for (var dx = -1; dx <= 1; dx++) {
-            let sx = clamp(texelX + dx, 0, i32(atlasDims.x) - 1);
-            let sy = clamp(texelY + dy, 0, i32(atlasDims.y) - 1);
-            let storedDepth = textureLoad(physAtlas, vec2i(sx, sy), 0);
-            // depth test: fragment depth <= stored depth means lit (depth buffer convention)
-            shadow += select(0.0, 1.0, safeDepth <= storedDepth);
+    var totalWeight = 0.0;
+
+    for (var ky = -2; ky <= 2; ky++) {
+        for (var kx = -2; kx <= 2; kx++) {
+            let dist = f32(kx * kx + ky * ky);
+            let w = exp(-dist * 0.3);
+
+            let ox = baseX + kx;
+            let oy = baseY + ky;
+
+            // Clamp to tile boundaries (not whole atlas) to prevent cross-level bleeding
+            let s00 = textureLoad(physAtlas, vec2i(clamp(ox,     tileMinX, tileMaxX), clamp(oy,     tileMinY, tileMaxY)), 0);
+            let s10 = textureLoad(physAtlas, vec2i(clamp(ox + 1, tileMinX, tileMaxX), clamp(oy,     tileMinY, tileMaxY)), 0);
+            let s01 = textureLoad(physAtlas, vec2i(clamp(ox,     tileMinX, tileMaxX), clamp(oy + 1, tileMinY, tileMaxY)), 0);
+            let s11 = textureLoad(physAtlas, vec2i(clamp(ox + 1, tileMinX, tileMaxX), clamp(oy + 1, tileMinY, tileMaxY)), 0);
+
+            let c00 = select(0.0, 1.0, safeDepth <= s00);
+            let c10 = select(0.0, 1.0, safeDepth <= s10);
+            let c01 = select(0.0, 1.0, safeDepth <= s01);
+            let c11 = select(0.0, 1.0, safeDepth <= s11);
+
+            let bilinear = mix(mix(c00, c10, fracX), mix(c01, c11, fracX), fracY);
+
+            shadow += bilinear * w;
+            totalWeight += w;
         }
     }
-    shadow /= 9.0;
+
+    shadow /= totalWeight;
 
     // If sun is disabled or position is outside all clipmap levels, return fully lit
     let valid = select(0.0, 1.0, sun.color.a >= 0.5 && level < vsm.clipmap_count);
@@ -290,13 +331,12 @@ fn calculateShadowVSMSimple(
         return 1.0;
     }
 
-    // Direct atlas sampling (level-band mapping)
-    let atlasSize = f32(vsm.phys_atlas_size);
-    let rowsPerLevel = vsm.phys_atlas_size / vsm.clipmap_count;
-    let yOffset = f32(level * rowsPerLevel);
-    let atlasUV = vec2f(uv.x, (yOffset + uv.y * f32(rowsPerLevel)) / atlasSize);
-
-    let ssi = vec2i(vec2f(atlasSize, atlasSize) * atlasUV);
+    // Square grid layout (same as calculateShadowVSM)
+    let tile = vsmTileInfo(vsm, level);
+    let ssi = vec2i(
+        i32(f32(tile.x) + uv.x * f32(tile.z)),
+        i32(f32(tile.y) + uv.y * f32(tile.z))
+    );
     let shadowDepth = textureLoad(physAtlas, ssi, 0);
     return select(0.0, 1.0, depth <= shadowDepth + 0.005);
 }

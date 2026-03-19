@@ -61,7 +61,7 @@ export class Stage {
         // light_vp matrix (16 floats) — placeholder identity, VSM uses its own clipmap VPs
         data[8] = 1; data[13] = 1; data[18] = 1; data[23] = 1;
         // shadow_params: x = texel size, y = bias
-        data[24] = 1.0 / VSM.PHYS_ATLAS_SIZE;
+        data[24] = 1.0 / this.vsm.physAtlasSize;
         data[25] = 0.05; // normal bias
         data[26] = 0;
         data[27] = 0;
