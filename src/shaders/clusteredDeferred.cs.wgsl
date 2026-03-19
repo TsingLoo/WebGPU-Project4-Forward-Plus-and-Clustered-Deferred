@@ -19,6 +19,7 @@
 @group(${bindGroup_scene}) @binding(17) var<uniform> ddgiParams: DDGIUniforms;
 @group(${bindGroup_scene}) @binding(18) var ddgiSampler: sampler;
 @group(${bindGroup_scene}) @binding(19) var<uniform> sunLight: SunLight;
+@group(${bindGroup_scene}) @binding(20) var shadowMap: texture_depth_2d;
 
 @compute @workgroup_size(8, 8, 1)
 fn main(
@@ -94,8 +95,9 @@ fn main(
         Lo += calculateLightContribPBR(light, pos_world, N, V, albedo, metallic, roughness);
     }
 
-    // Sun/directional light
-    Lo += calculateSunLightPBR(sunLight, pos_world, N, V, albedo, metallic, roughness);
+    // Sun/directional light with shadow (simple shadow for compute shader, no comparison sampler)
+    let shadow = calculateShadowSimple(shadowMap, sunLight, pos_world, N);
+    Lo += calculateSunLightPBR(sunLight, pos_world, N, V, albedo, metallic, roughness, shadow);
 
     // ---- IBL Ambient (split-sum approximation) ----
     let F0 = mix(vec3f(0.04), albedo, metallic);

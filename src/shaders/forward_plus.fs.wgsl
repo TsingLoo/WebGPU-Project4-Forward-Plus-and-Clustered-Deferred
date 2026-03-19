@@ -12,6 +12,11 @@
 @group(${bindGroup_scene}) @binding(11) var<uniform> ddgiParams: DDGIUniforms;
 @group(${bindGroup_scene}) @binding(12) var ddgiSampler: sampler;
 @group(${bindGroup_scene}) @binding(13) var<uniform> sunLight: SunLight;
+// VSM bindings
+@group(${bindGroup_scene}) @binding(14) var vsmPhysAtlas: texture_depth_2d;
+@group(${bindGroup_scene}) @binding(15) var vsmShadowSampler: sampler_comparison;
+@group(${bindGroup_scene}) @binding(16) var<storage, read> vsmPageTable: array<u32>;
+@group(${bindGroup_scene}) @binding(17) var<uniform> vsmUniforms: VSMUniforms;
 
 @group(${bindGroup_material}) @binding(0) var diffuseTex: texture_2d<f32>;
 @group(${bindGroup_material}) @binding(1) var diffuseTexSampler: sampler;
@@ -117,8 +122,9 @@ fn main(in: FragmentInput) -> @location(0) vec4f
         Lo += calculateLightContribPBR(light, in.pos_world, N, V, albedo, metallic, roughness);
     }
 
-    // Sun/directional light
-    Lo += calculateSunLightPBR(sunLight, in.pos_world, N, V, albedo, metallic, roughness);
+    // Sun/directional light with VSM shadow
+    let shadow = calculateShadowVSM(vsmPhysAtlas, vsmShadowSampler, vsmUniforms, sunLight, in.pos_world, N);
+    Lo += calculateSunLightPBR(sunLight, in.pos_world, N, V, albedo, metallic, roughness, shadow);
 
     // ---- IBL Ambient (split-sum approximation) ----
     let F0 = mix(vec3f(0.04), albedo, metallic);

@@ -315,6 +315,8 @@ export class DDGI {
                 { binding: 8, visibility: GPUShaderStage.COMPUTE, sampler: {} },                     // env sampler
                 { binding: 9, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },     // ray data
                 { binding: 10, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },    // sun light
+                { binding: 11, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'depth' } }, // VSM physical atlas
+                { binding: 12, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },     // VSM uniforms
             ]
         });
     }
@@ -367,7 +369,9 @@ export class DDGI {
             albedo: GPUTextureView,
             position: GPUTextureView,
         },
-        sunLightBuffer: GPUBuffer
+        sunLightBuffer: GPUBuffer,
+        shadowMapView: GPUTextureView,
+        vsmUniformBuffer: GPUBuffer,
     ) {
         if (!this.enabled) return;
 
@@ -395,6 +399,8 @@ export class DDGI {
                 { binding: 8, resource: this.environment.envSampler },
                 { binding: 9, resource: { buffer: this.rayDataBuffer } },
                 { binding: 10, resource: { buffer: sunLightBuffer } },
+                { binding: 11, resource: shadowMapView },
+                { binding: 12, resource: { buffer: vsmUniformBuffer } },
             ]
         });
 

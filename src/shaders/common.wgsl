@@ -138,8 +138,10 @@ fn calculateLightContrib(light: Light, posWorld: vec3f, nor: vec3f) -> vec3f {
 // Directional Sun Light
 // ============================
 struct SunLight {
-    direction: vec4f,   // xyz = direction TO light (normalized), w = intensity
-    color: vec4f,       // rgb = color, a = enabled (0 or 1)
+    direction: vec4f,       // xyz = direction TO light (normalized), w = intensity
+    color: vec4f,           // rgb = color, a = enabled (0 or 1)
+    light_vp: mat4x4f,      // light-space view-projection matrix (unused now, kept for layout compat)
+    shadow_params: vec4f,    // x = 1/shadow_map_size, y = bias, z = 0, w = 0
 }
 
 fn calculateSunLightPBR(
@@ -149,7 +151,8 @@ fn calculateSunLightPBR(
     V: vec3f,
     albedo: vec3f,
     metallic: f32,
-    roughness: f32
+    roughness: f32,
+    shadow: f32
 ) -> vec3f {
     if (sun.color.a < 0.5) { return vec3f(0.0); }
 
@@ -173,7 +176,129 @@ fn calculateSunLightPBR(
     let kD = (vec3f(1.0) - kS) * (1.0 - metallic);
 
     let NdotL = max(dot(N, L), 0.0);
-    return (kD * albedo / PI + specular) * radiance * NdotL;
+    return (kD * albedo / PI + specular) * radiance * NdotL * shadow;
+}
+
+// ============================
+// Virtual Shadow Map (VSM)
+// ============================
+struct VSMUniforms {
+    clipmap_vp: array<mat4x4f, 6>,   // VP matrix per clipmap level
+    inv_view_proj: mat4x4f,          // camera inverse view-projection (for mark pass)
+    clipmap_count: u32,
+    pages_per_axis: u32,             // 128
+    phys_atlas_size: u32,            // 4096
+    phys_pages_per_axis: u32,        // 32
+}
+
+// Select best clipmap level based on world position → light NDC coverage
+fn vsmSelectClipmapLevel(
+    vsm: VSMUniforms,
+    posWorld: vec3f,
+) -> u32 {
+    for (var level = 0u; level < vsm.clipmap_count; level++) {
+        let lightClip = vsm.clipmap_vp[level] * vec4f(posWorld, 1.0);
+        let lightNDC = lightClip.xyz / lightClip.w;
+
+        // Check if within NDC bounds
+        if (lightNDC.x >= -1.0 && lightNDC.x <= 1.0 &&
+            lightNDC.y >= -1.0 && lightNDC.y <= 1.0 &&
+            lightNDC.z >= 0.0  && lightNDC.z <= 1.0) {
+            return level;
+        }
+    }
+    return vsm.clipmap_count; // No valid level
+}
+
+// Calculate shadow using VSM (Virtual Shadow Map) with clipmap atlas
+// Uses textureLoad instead of textureSampleCompare to avoid uniform control flow restrictions
+fn calculateShadowVSM(
+    physAtlas: texture_depth_2d,
+    shadowSampler: sampler_comparison, // kept for API compat, unused
+    vsm: VSMUniforms,
+    sun: SunLight,
+    posWorld: vec3f,
+    N: vec3f,
+) -> f32 {
+    // Normal bias to avoid shadow acne
+    let bias = sun.shadow_params.y;
+    let biasedPos = posWorld + N * bias;
+
+    // Select finest valid clipmap level
+    let level = vsmSelectClipmapLevel(vsm, biasedPos);
+
+    // Compute UV and depth for sampling (use level 0 as safe fallback)
+    let safeLevel = min(level, vsm.clipmap_count - 1u);
+    let lightClip = vsm.clipmap_vp[safeLevel] * vec4f(biasedPos, 1.0);
+    let lightNDC = lightClip.xyz / lightClip.w;
+
+    let uv = vec2f(lightNDC.x * 0.5 + 0.5, -lightNDC.y * 0.5 + 0.5);
+    let depth = lightNDC.z;
+
+    // Direct atlas UV: each clipmap level gets a horizontal band
+    let atlasDims = textureDimensions(physAtlas, 0);
+    let atlasW = f32(atlasDims.x);
+    let atlasH = f32(atlasDims.y);
+    let rowsPerLevel = atlasDims.y / max(vsm.clipmap_count, 1u);
+    let yOffset = safeLevel * rowsPerLevel;
+
+    // Convert UV to texel coordinates
+    let texelX = i32(clamp(uv.x * atlasW, 0.0, atlasW - 1.0));
+    let texelY = i32(clamp(f32(yOffset) + uv.y * f32(rowsPerLevel), 0.0, atlasH - 1.0));
+    let safeDepth = clamp(depth, 0.0, 1.0);
+
+    // 3x3 PCF using textureLoad (no uniform control flow requirement)
+    var shadow = 0.0;
+    for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+            let sx = clamp(texelX + dx, 0, i32(atlasDims.x) - 1);
+            let sy = clamp(texelY + dy, 0, i32(atlasDims.y) - 1);
+            let storedDepth = textureLoad(physAtlas, vec2i(sx, sy), 0);
+            // depth test: fragment depth <= stored depth means lit (depth buffer convention)
+            shadow += select(0.0, 1.0, safeDepth <= storedDepth);
+        }
+    }
+    shadow /= 9.0;
+
+    // If sun is disabled or position is outside all clipmap levels, return fully lit
+    let valid = select(0.0, 1.0, sun.color.a >= 0.5 && level < vsm.clipmap_count);
+    return mix(1.0, shadow, valid);
+}
+
+// Simple VSM shadow for compute shaders (DDGI probes) — no comparison sampler
+fn calculateShadowVSMSimple(
+    physAtlas: texture_depth_2d,
+    vsm: VSMUniforms,
+    sun: SunLight,
+    posWorld: vec3f,
+    N: vec3f,
+) -> f32 {
+    if (sun.color.a < 0.5) { return 1.0; }
+
+    let bias = sun.shadow_params.y;
+    let biasedPos = posWorld + N * bias;
+
+    let level = vsmSelectClipmapLevel(vsm, biasedPos);
+    if (level >= vsm.clipmap_count) { return 1.0; }
+
+    let lightClip = vsm.clipmap_vp[level] * vec4f(biasedPos, 1.0);
+    let lightNDC = lightClip.xyz / lightClip.w;
+    let uv = vec2f(lightNDC.x * 0.5 + 0.5, -lightNDC.y * 0.5 + 0.5);
+    let depth = lightNDC.z;
+
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || depth > 1.0) {
+        return 1.0;
+    }
+
+    // Direct atlas sampling (level-band mapping)
+    let atlasSize = f32(vsm.phys_atlas_size);
+    let rowsPerLevel = vsm.phys_atlas_size / vsm.clipmap_count;
+    let yOffset = f32(level * rowsPerLevel);
+    let atlasUV = vec2f(uv.x, (yOffset + uv.y * f32(rowsPerLevel)) / atlasSize);
+
+    let ssi = vec2i(vec2f(atlasSize, atlasSize) * atlasUV);
+    let shadowDepth = textureLoad(physAtlas, ssi, 0);
+    return select(0.0, 1.0, depth <= shadowDepth + 0.005);
 }
 
 // ============================

@@ -2,6 +2,7 @@ import * as renderer from '../renderer';
 import * as shaders from '../shaders/shaders';
 import { Stage } from '../stage/stage';
 import { DDGI } from '../stage/ddgi';
+import { VSM } from '../stage/vsm';
 
 export class ForwardPlusRenderer extends renderer.Renderer {
     depthTexture: GPUTexture;
@@ -20,7 +21,7 @@ export class ForwardPlusRenderer extends renderer.Renderer {
     cullingPipeline: GPUComputePipeline;
 
     shadingBindGroupLayout: GPUBindGroupLayout; 
-    shadingBindGroup: GPUBindGroup;
+    shadingBindGroup!: GPUBindGroup;
     shadingPipeline: GPURenderPipeline;
 
     skyboxPipeline: GPURenderPipeline;
@@ -41,6 +42,7 @@ export class ForwardPlusRenderer extends renderer.Renderer {
     geometryPipeline: GPURenderPipeline;
 
     ddgi: DDGI;
+    vsm: VSM;
     private stageEnv: import('../stage/environment').Environment;
     private stage: import('../stage/stage').Stage;
 
@@ -122,6 +124,7 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         const env = stage.environment;
         this.stageEnv = env;
         this.ddgi = stage.ddgi;
+        this.vsm = stage.vsm;
         this.stage = stage;
 
         // Geometry bind group (camera only) for G-buffer pass
@@ -161,6 +164,7 @@ export class ForwardPlusRenderer extends renderer.Renderer {
             primitive: { topology: 'triangle-list', cullMode: 'back' }
         });
 
+        // Shading bind group layout — now with VSM bindings
         this.shadingBindGroupLayout = renderer.device.createBindGroupLayout({
             label: "shading bind group layout",
             entries: [
@@ -231,6 +235,26 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                 },
                 {   // Sun Light
                     binding: 13,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    buffer: { type: "uniform" }
+                },
+                {   // VSM Physical Atlas (depth texture)
+                    binding: 14,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: { sampleType: "depth" }
+                },
+                {   // VSM Comparison Sampler
+                    binding: 15,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    sampler: { type: "comparison" }
+                },
+                {   // VSM Page Table (read-only storage)
+                    binding: 16,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    buffer: { type: "read-only-storage" }
+                },
+                {   // VSM Uniforms
+                    binding: 17,
                     visibility: GPUShaderStage.FRAGMENT,
                     buffer: { type: "uniform" }
                 }
@@ -323,28 +347,11 @@ export class ForwardPlusRenderer extends renderer.Renderer {
             }
         });
 
-        this.shadingBindGroup = renderer.device.createBindGroup({
-            label: "shading bind group",
-            layout: this.shadingBindGroupLayout,
-            entries: [
-                { binding: 0, resource: { buffer: this.camera.uniformsBuffer }},
-                { binding: 1, resource: { buffer: this.lights.lightSetStorageBuffer }},
-                { binding: 2, resource: { buffer: this.tileOffsetsDeviceBuffer }},
-                { binding: 3, resource: { buffer: this.globalLightIndicesDeviceBuffer }},
-                { binding: 4, resource: { buffer: this.clusterSetDeviceBuffer }},
-                { binding: 5, resource: env.irradianceMapView },
-                { binding: 6, resource: env.prefilteredMapView },
-                { binding: 7, resource: env.brdfLutView },
-                { binding: 8, resource: env.envSampler },
-                { binding: 9, resource: this.ddgi.getCurrentIrradianceView() },
-                { binding: 10, resource: this.ddgi.getCurrentVisibilityView() },
-                { binding: 11, resource: { buffer: this.ddgi.ddgiUniformBuffer } },
-                { binding: 12, resource: this.ddgi.ddgiSampler },
-                { binding: 13, resource: { buffer: this.stage.sunLightBuffer } },
-            ]
-        }); // This will be recreated each frame in draw()
+        // Initial shading bind group (will be recreated each frame for DDGI ping-pong)
+        this.createShadingBindGroup();
 
         this.shadingPipeline = renderer.device.createRenderPipeline({
+            label: "Forward+ Shading Pipeline",
             layout: renderer.device.createPipelineLayout({
                 bindGroupLayouts: [
                     this.shadingBindGroupLayout,
@@ -363,6 +370,7 @@ export class ForwardPlusRenderer extends renderer.Renderer {
             },
             fragment: {
                 module: renderer.device.createShaderModule({
+                    label: "Forward+ Shading Fragment",
                     code: shaders.forwardPlusFragSrc,
                 }),
                 targets: [ { format: renderer.canvasFormat }]
@@ -411,11 +419,42 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         });
     }
 
+    private createShadingBindGroup() {
+        this.shadingBindGroup = renderer.device.createBindGroup({
+            label: "shading bind group",
+            layout: this.shadingBindGroupLayout,
+            entries: [
+                { binding: 0, resource: { buffer: this.camera.uniformsBuffer }},
+                { binding: 1, resource: { buffer: this.lights.lightSetStorageBuffer }},
+                { binding: 2, resource: { buffer: this.tileOffsetsDeviceBuffer }},
+                { binding: 3, resource: { buffer: this.globalLightIndicesDeviceBuffer }},
+                { binding: 4, resource: { buffer: this.clusterSetDeviceBuffer }},
+                { binding: 5, resource: this.stageEnv.irradianceMapView },
+                { binding: 6, resource: this.stageEnv.prefilteredMapView },
+                { binding: 7, resource: this.stageEnv.brdfLutView },
+                { binding: 8, resource: this.stageEnv.envSampler },
+                { binding: 9, resource: this.ddgi.getCurrentIrradianceView() },
+                { binding: 10, resource: this.ddgi.getCurrentVisibilityView() },
+                { binding: 11, resource: { buffer: this.ddgi.ddgiUniformBuffer } },
+                { binding: 12, resource: this.ddgi.ddgiSampler },
+                { binding: 13, resource: { buffer: this.stage.sunLightBuffer } },
+                // VSM bindings
+                { binding: 14, resource: this.vsm.physicalAtlasView },
+                { binding: 15, resource: this.vsm.shadowComparisonSampler },
+                { binding: 16, resource: { buffer: this.vsm.pageTableBuffer } },
+                { binding: 17, resource: { buffer: this.vsm.vsmUniformBuffer } },
+            ]
+        });
+    }
+
     override draw() {
         const encoder = renderer.device.createCommandEncoder();
         const canvasTextureView = renderer.context.getCurrentTexture().createView();
 
-        // Z-Prepass
+        // Update sun light
+        this.stage.updateSunLight();
+
+        // Z-Prepass — fill depth buffer first (needed by VSM page marking)
         const zPrepass = encoder.beginRenderPass({
             label: "z prepass",
             colorAttachments: [],
@@ -438,6 +477,9 @@ export class ForwardPlusRenderer extends renderer.Renderer {
             zPrepass.drawIndexed(primitive.numIndices);
         });
         zPrepass.end();
+
+        // VSM Shadow Map Pass (uses depth buffer for page marking)
+        this.stage.renderShadowMap(encoder, this.depthTextureView);
 
         // G-buffer pass (for DDGI probe tracing)
         const gBufferPass = encoder.beginRenderPass({
@@ -467,35 +509,17 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         gBufferPass.end();
 
         // DDGI update (uses G-buffer for screen-space probe tracing)
+        // Pass VSM physical atlas for shadow sampling in probes
         this.ddgi.update(encoder, {
             depth: this.depthTextureView,
             normal: this.gBufferNormalTextureView,
             albedo: this.gBufferAlbedoTextureView,
             position: this.gBufferPositionTextureView,
-        }, this.stage.sunLightBuffer);
+        }, this.stage.sunLightBuffer, this.vsm.physicalAtlasView, this.vsm.vsmUniformBuffer);
 
         // Recreate shading bind group each frame for DDGI ping-pong atlas views
         this.ddgi.updateUniforms();
-        this.shadingBindGroup = renderer.device.createBindGroup({
-            label: "shading bind group",
-            layout: this.shadingBindGroupLayout,
-            entries: [
-                { binding: 0, resource: { buffer: this.camera.uniformsBuffer }},
-                { binding: 1, resource: { buffer: this.lights.lightSetStorageBuffer }},
-                { binding: 2, resource: { buffer: this.tileOffsetsDeviceBuffer }},
-                { binding: 3, resource: { buffer: this.globalLightIndicesDeviceBuffer }},
-                { binding: 4, resource: { buffer: this.clusterSetDeviceBuffer }},
-                { binding: 5, resource: this.stageEnv.irradianceMapView },
-                { binding: 6, resource: this.stageEnv.prefilteredMapView },
-                { binding: 7, resource: this.stageEnv.brdfLutView },
-                { binding: 8, resource: this.stageEnv.envSampler },
-                { binding: 9, resource: this.ddgi.getCurrentIrradianceView() },
-                { binding: 10, resource: this.ddgi.getCurrentVisibilityView() },
-                { binding: 11, resource: { buffer: this.ddgi.ddgiUniformBuffer } },
-                { binding: 12, resource: this.ddgi.ddgiSampler },
-                { binding: 13, resource: { buffer: this.stage.sunLightBuffer } },
-            ]
-        });
+        this.createShadingBindGroup();
 
         // Reset light indices counter
         encoder.copyBufferToBuffer(

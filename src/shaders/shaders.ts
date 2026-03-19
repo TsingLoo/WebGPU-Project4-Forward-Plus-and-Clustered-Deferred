@@ -35,6 +35,15 @@ import ddgiIrradianceUpdateRaw from './ddgi_irradiance_update.cs.wgsl?raw';
 import ddgiVisibilityUpdateRaw from './ddgi_visibility_update.cs.wgsl?raw';
 import ddgiBorderUpdateRaw from './ddgi_border_update.cs.wgsl?raw';
 
+// Shadow shaders
+import shadowVertRaw from './shadow.vs.wgsl?raw';
+import shadowFragRaw from './shadow.fs.wgsl?raw';
+
+// VSM shaders
+import vsmClearRaw from './vsm_clear.cs.wgsl?raw';
+import vsmMarkPagesRaw from './vsm_mark_pages.cs.wgsl?raw';
+import vsmAllocatePagesRaw from './vsm_allocate_pages.cs.wgsl?raw';
+
 // Skybox shaders
 import skyboxVertRaw from './skybox.vs.wgsl?raw';
 import skyboxFragRaw from './skybox.fs.wgsl?raw';
@@ -75,6 +84,13 @@ export const constants = {
     ddgiRaysPerProbe: 64,
     ddgiIrradianceTexels: 8,
     ddgiVisibilityTexels: 16,
+
+    // VSM
+    vsmPageSize: 128,
+    vsmPhysAtlasSize: 4096,
+    vsmPhysPagesPerAxis: 32,
+    vsmNumClipmapLevels: 6,
+    vsmPagesPerLevelAxis: 128,
 };
 
 // =================================
@@ -140,3 +156,12 @@ export const ddgiProbeTraceSrc: string = processShaderRaw(ddgiProbeTraceRaw);
 export const ddgiIrradianceUpdateSrc: string = processShaderRaw(ddgiIrradianceUpdateRaw);
 export const ddgiVisibilityUpdateSrc: string = processShaderRaw(ddgiVisibilityUpdateRaw);
 export const ddgiBorderUpdateSrc: string = ddgiBorderUpdateRaw; // standalone, no common
+
+// Shadow shaders (standalone)
+export const shadowVertSrc: string = shadowVertRaw;
+export const shadowFragSrc: string = shadowFragRaw;
+
+// VSM shaders (need common for VSMUniforms struct)
+export const vsmClearSrc: string = processShaderRaw(vsmClearRaw);
+export const vsmMarkPagesSrc: string = processShaderRaw(vsmMarkPagesRaw);
+export const vsmAllocatePagesSrc: string = processShaderRaw(vsmAllocatePagesRaw);

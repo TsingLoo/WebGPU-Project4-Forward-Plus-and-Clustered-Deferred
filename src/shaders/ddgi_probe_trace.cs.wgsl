@@ -12,6 +12,8 @@
 @group(0) @binding(8) var envSampler: sampler;
 @group(0) @binding(9) var<storage, read_write> rayData: array<vec4f>; // [radiance.rgb, hitDist]
 @group(0) @binding(10) var<uniform> sunLight: SunLight;
+@group(0) @binding(11) var vsmPhysAtlas: texture_depth_2d;
+@group(0) @binding(12) var<uniform> vsmUniforms: VSMUniforms;
 
 const DDGI_RAYS_PER_PROBE: u32 = ${ddgiRaysPerProbe}u;
 const GOLDEN_RATIO: f32 = 1.618033988749895;
@@ -114,11 +116,13 @@ fn main(
                 // Compute lighting at the hit point for proper bounce radiance
                 var hitLighting = vec3f(0.0);
 
-                // Sun light contribution at hit surface
+                // Sun light contribution at hit surface (with shadow)
                 if (sunLight.color.a > 0.5) {
+                    let hitPos = textureLoad(positionTex, ssi, 0).xyz;
+                    let sunShadow = calculateShadowVSMSimple(vsmPhysAtlas, vsmUniforms, sunLight, hitPos, hitNormal);
                     let sunL = normalize(sunLight.direction.xyz);
                     let sunNdotL = max(dot(hitNormal, sunL), 0.0);
-                    hitLighting += sunLight.color.rgb * sunLight.direction.w * sunNdotL;
+                    hitLighting += sunLight.color.rgb * sunLight.direction.w * sunNdotL * sunShadow;
                 }
 
                 // Add ambient term so shadowed areas still contribute some bounce

@@ -231,6 +231,9 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 { binding: 17, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },       // ddgi uniforms
                 { binding: 18, visibility: GPUShaderStage.COMPUTE, sampler: {} },                       // ddgi sampler
                 { binding: 19, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },       // sun light
+                { binding: 20, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'depth' } },   // VSM physical atlas
+                { binding: 21, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } }, // VSM page table
+                { binding: 22, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },         // VSM uniforms
             ]
         });
 
@@ -323,6 +326,10 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 { binding: 16, resource: this.ddgi.getCurrentVisibilityView() },
                 { binding: 17, resource: { buffer: this.ddgi.ddgiUniformBuffer } },
                 { binding: 18, resource: this.ddgi.ddgiSampler },
+                { binding: 19, resource: { buffer: this.stage.sunLightBuffer } },
+                { binding: 20, resource: this.stage.vsm.physicalAtlasView },
+                { binding: 21, resource: { buffer: this.stage.vsm.pageTableBuffer } },
+                { binding: 22, resource: { buffer: this.stage.vsm.vsmUniformBuffer } },
             ]
         });
 
@@ -428,7 +435,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         const encoder = renderer.device.createCommandEncoder();
         const canvasTextureView = renderer.context.getCurrentTexture().createView();
 
-        // Z-Prepass
+        // Z-Prepass (must be before VSM shadow map for page marking)
         const zPrepass = encoder.beginRenderPass({
             label: "z prepass",
             colorAttachments: [],
@@ -451,6 +458,11 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             zPrepass.drawIndexed(primitive.numIndices);
         });
         zPrepass.end();
+
+        // VSM shadow map pass (after Z-prepass, needs depth for page marking)
+        this.stage.renderShadowMap(encoder, this.depthTextureView);
+
+
 
         // Geometry pass
         const geometryRenderPass = encoder.beginRenderPass({
@@ -503,7 +515,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             normal: this.geometryNormalDeviceTextureView,
             albedo: this.geometryAlbedoDeviceTextureView,
             position: this.geometryPositionDeviceTextureView,
-        }, this.stage.sunLightBuffer);
+        }, this.stage.sunLightBuffer, this.stage.vsm.physicalAtlasView, this.stage.vsm.vsmUniformBuffer);
 
         // Recreate shading bind group to pick up current DDGI atlas (ping-pong)
         this.shadingBindGroup = renderer.device.createBindGroup({
@@ -530,6 +542,9 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 { binding: 17, resource: { buffer: this.ddgi.ddgiUniformBuffer } },
                 { binding: 18, resource: this.ddgi.ddgiSampler },
                 { binding: 19, resource: { buffer: this.stage.sunLightBuffer } },
+                { binding: 20, resource: this.stage.vsm.physicalAtlasView },
+                { binding: 21, resource: { buffer: this.stage.vsm.pageTableBuffer } },
+                { binding: 22, resource: { buffer: this.stage.vsm.vsmUniformBuffer } },
             ]
         });
 
