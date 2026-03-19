@@ -401,7 +401,7 @@ ddgiFolder.add(stage.ddgi, 'irradianceHysteresis', 0.8, 0.999).step(0.001).name(
 ddgiFolder.add(stage.ddgi, 'normalBias', 0.0, 1.0).step(0.01).name('Normal Bias').onChange(() => {
     stage.ddgi.updateUniforms();
 });
-ddgiFolder.add(stage.ddgi, 'debugMode', { 'Off': 0, 'Raw Atlas': 1, 'Decoded Irr': 2, 'IBL Only': 3, 'Mapped Normal': 4, 'Vertex Normal': 5, 'Tangent': 6, 'NdotL': 7 }).name('Debug View').onChange(() => {
+ddgiFolder.add(stage.ddgi, 'debugMode', { 'Off': 0, 'Raw Atlas': 1, 'Decoded Irr': 2, 'IBL Only': 3, 'Mapped Normal': 4, 'Vertex Normal': 5, 'Tangent': 6, 'NdotL': 7, 'Probe Grid': 8 }).name('Debug View').onChange(() => {
     stage.ddgi.updateUniforms();
 });
 ddgiFolder.open();

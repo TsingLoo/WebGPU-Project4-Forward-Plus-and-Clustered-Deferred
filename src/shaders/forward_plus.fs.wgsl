@@ -151,7 +151,8 @@ fn main(in: FragmentInput) -> @location(0) vec4f
     let kD = (vec3f(1.0) - kS) * (1.0 - metallic);
 
     // Diffuse IBL from preconvolved irradiance map
-    let iblIrradiance = textureSample(irradianceMap, iblSampler, N).rgb;
+    // Use geometric normal for low-frequency diffuse - avoids normal map modulating ambient
+    let iblIrradiance = textureSample(irradianceMap, iblSampler, vertexNormal).rgb;
 
     // Specular IBL (split-sum)
     let R = reflect(-V, N);
@@ -167,7 +168,9 @@ fn main(in: FragmentInput) -> @location(0) vec4f
         let ddgi_spacing = ddgiParams.grid_spacing.xyz;
         let ddgi_gridMin = ddgiParams.grid_min.xyz;
         let ddgi_normalBias = ddgiParams.hysteresis.z;
-        let ddgi_biasedPos = in.pos_world + N * ddgi_normalBias;
+        // Use geometric (vertex) normal for probe selection to avoid
+        // normal map high-frequency variations causing spotted artifacts
+        let ddgi_biasedPos = in.pos_world + vertexNormal * ddgi_normalBias;
         let ddgi_fractIdx = (ddgi_biasedPos - ddgi_gridMin) / ddgi_spacing;
         let ddgi_baseIdx = vec3i(floor(ddgi_fractIdx));
         let ddgi_alpha = ddgi_fractIdx - floor(ddgi_fractIdx);
@@ -185,9 +188,10 @@ fn main(in: FragmentInput) -> @location(0) vec4f
 
                     let p_dir = in.pos_world - p_pos;
                     let p_dist = length(p_dir);
-                    let p_dirN = select(N, normalize(p_dir), p_dist > 0.001);
+                    let p_dirN = select(vertexNormal, normalize(p_dir), p_dist > 0.001);
 
-                    let p_wrap = (dot(p_dirN, N) + 1.0) * 0.5;
+                    // Use geometric normal for wrap-around test
+                    let p_wrap = (dot(p_dirN, vertexNormal) + 1.0) * 0.5;
                     if (p_wrap <= 0.0) { continue; }
 
                     let p_tri = vec3f(
@@ -208,13 +212,18 @@ fn main(in: FragmentInput) -> @location(0) vec4f
                     }
 
                     p_w *= p_wrap;
-                    p_w = max(p_w, 0.0001);
+                    if (p_w < 0.00001) { continue; } // skip probes with negligible weight
 
-                    let p_irrUV = ddgiIrradianceTexelCoord(p_idx, octEncode(N), ddgiParams);
+                    // Use geometric normal for irradiance lookup - DDGI probes are low-res
+                    // and normal map variations would sample wildly different atlas regions
+                    let p_irrUV = ddgiIrradianceTexelCoord(p_idx, octEncode(vertexNormal), ddgiParams);
                     let p_irr_encoded = textureSampleLevel(ddgiIrradianceAtlas, ddgiSampler, p_irrUV, 0.0).rgb;
-                    // Decode from perceptual gamma space (pow 5.0) to linear
-                    let p_irr = pow(max(p_irr_encoded, vec3f(0.0)), vec3f(5.0));
-                    ddgi_totalIrr += p_irr * p_w;
+                    // Clamp to [0,1] before pow decode: atlas border interpolation can
+                    // produce values slightly > 1, and pow(1.1, 5) = 1.61 creates fireflies
+                    let p_irr = pow(clamp(p_irr_encoded, vec3f(0.0), vec3f(1.0)), vec3f(5.0));
+                    // Clamp decoded irradiance to prevent HDR fireflies
+                    let p_irr_clamped = min(p_irr, vec3f(10.0));
+                    ddgi_totalIrr += p_irr_clamped * p_w;
                     ddgi_totalW += p_w;
                 }
             }
@@ -288,6 +297,36 @@ fn main(in: FragmentInput) -> @location(0) vec4f
         let sunDir = normalize(sunLight.direction.xyz);
         let ndotl = max(dot(N, sunDir), 0.0);
         return vec4f(vec3f(ndotl), 1.0);
+    }
+    if (debugMode == 8) {
+        // Mode 8: DDGI Probe Grid visualization
+        // Show probe positions as colored dots overlaid on the scene
+        let spacing = ddgiParams.grid_spacing.xyz;
+        let gridMin = ddgiParams.grid_min.xyz;
+        let relPos = (in.pos_world - gridMin) / spacing;
+        let nearestProbe = round(relPos);
+        let probePos = gridMin + nearestProbe * spacing;
+        let distToProbe = length(in.pos_world - probePos);
+        let probeRadius = min(min(spacing.x, spacing.y), spacing.z) * 0.08;
+        if (distToProbe < probeRadius) {
+            // Color by grid position
+            let gridIdx = vec3i(nearestProbe);
+            let col = vec3f(
+                f32(gridIdx.x % 2),
+                f32(gridIdx.y % 2),
+                f32(gridIdx.z % 2)
+            ) * 0.5 + 0.5;
+            return vec4f(col, 1.0);
+        }
+        // Show faded version of normal scene + grid lines
+        let gridFrac = fract(relPos);
+        let gridLine = step(vec3f(0.95), gridFrac) + step(gridFrac, vec3f(0.05));
+        let isGrid = max(max(gridLine.x, gridLine.y), gridLine.z);
+        if (isGrid > 0.0) {
+            return vec4f(0.0, 1.0, 1.0, 1.0); // Cyan grid lines
+        }
+        // Darken non-grid pixels slightly for contrast
+        return vec4f(albedo * 0.3, 1.0);
     }
 
     // Combine: diffuse ambient + specular IBL

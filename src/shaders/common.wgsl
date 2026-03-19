@@ -404,9 +404,13 @@ fn ddgiIrradianceTexelCoord(probeIdx: i32, octUV: vec2f, ddgi: DDGIUniforms) -> 
     let cornerX = f32(probeCol * texelDimBorder + 1); // +1 for border
     let cornerY = f32(probeRow * texelDimBorder + 1);
 
+    // Inset UVs by half texel to avoid sampling from uninitialized border
+    let inset = 0.5 / f32(texelDim);
+    let safeUV = clamp(octUV, vec2f(inset), vec2f(1.0 - inset));
+
     // UV within probe texel region
-    let texelX = cornerX + octUV.x * f32(texelDim - 1);
-    let texelY = cornerY + octUV.y * f32(texelDim - 1);
+    let texelX = cornerX + safeUV.x * f32(texelDim - 1);
+    let texelY = cornerY + safeUV.y * f32(texelDim - 1);
 
     return vec2f(texelX / atlasWidth, texelY / atlasHeight);
 }
@@ -425,8 +429,12 @@ fn ddgiVisibilityTexelCoord(probeIdx: i32, octUV: vec2f, ddgi: DDGIUniforms) -> 
     let cornerX = f32(probeCol * texelDimBorder + 1);
     let cornerY = f32(probeRow * texelDimBorder + 1);
 
-    let texelX = cornerX + octUV.x * f32(texelDim - 1);
-    let texelY = cornerY + octUV.y * f32(texelDim - 1);
+    // Inset UVs by half texel to avoid sampling from uninitialized border
+    let inset = 0.5 / f32(texelDim);
+    let safeUV = clamp(octUV, vec2f(inset), vec2f(1.0 - inset));
+
+    let texelX = cornerX + safeUV.x * f32(texelDim - 1);
+    let texelY = cornerY + safeUV.y * f32(texelDim - 1);
 
     return vec2f(texelX / atlasWidth, texelY / atlasHeight);
 }

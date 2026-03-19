@@ -446,9 +446,9 @@ export class DDGI {
         visPass.dispatchWorkgroups(1, 1, DDGI.TOTAL_PROBES);
         visPass.end();
 
-        // Border update skipped — requires reading and writing the same texture
-        // which is not allowed in WebGPU. Atlas border texels will have minor sampling
-        // artifacts at probe boundaries, but this is visually negligible.
+        // Border update skipped — WebGPU doesn't allow same texture as both read+write
+        // in the same bind group. Instead, we inset sampling UVs in ddgiIrradianceTexelCoord
+        // to avoid reading from uninitialized border texels.
 
         // Flip ping-pong
         this.pingPong = 1 - this.pingPong;
