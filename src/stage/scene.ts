@@ -51,25 +51,32 @@ export class Material {
         const mrTexIndex = gltfMaterial.pbrMetallicRoughness?.metallicRoughnessTexture?.index;
         const mrTexture = (mrTexIndex != null && mrTexIndex < texturesLinear.length) ? texturesLinear[mrTexIndex] : defaultTextureLinear;
 
+        // Normal texture uses linear (non-color data)
+        const normalTexIndex = (gltfMaterial as any).normalTexture?.index;
+        const normalTexture = (normalTexIndex != null && normalTexIndex < texturesLinear.length) ? texturesLinear[normalTexIndex] : defaultTextureLinear;
+
         // Extract PBR scalar factors from glTF
-        // Note: glTF spec defaults are both 1.0, but Sponza materials are dielectric
-        // so we default metallic to 0.0 when not specified
         const roughness = gltfMaterial.pbrMetallicRoughness?.roughnessFactor ?? 1.0;
         const metallic = gltfMaterial.pbrMetallicRoughness?.metallicFactor ?? 0.0;
         const baseColorFactor = gltfMaterial.pbrMetallicRoughness?.baseColorFactor ?? [1.0, 1.0, 1.0, 1.0];
 
         // Flag: does this material have a metallic-roughness texture?
         const hasMRTexture = (mrTexIndex != null && mrTexIndex < texturesLinear.length) ? 1.0 : 0.0;
+        const hasNormalTexture = (normalTexIndex != null && normalTexIndex < texturesLinear.length) ? 1.0 : 0.0;
 
-        // PBR params uniform: roughness, metallic, hasMRTexture, pad, baseColorFactor (vec4f) = 32 bytes
+        // PBR params uniform: 48 bytes (3 vec4f)
+        // vec4f[0]: roughness, metallic, hasMRTexture, hasNormalTexture
+        // vec4f[1]: baseColorFactor
+        // vec4f[2]: reserved
         const pbrParamsBuffer = device.createBuffer({
             label: "PBR params uniform",
-            size: 32,
+            size: 48,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });
         device.queue.writeBuffer(pbrParamsBuffer, 0, new Float32Array([
-            roughness, metallic, hasMRTexture, 0.0,
-            baseColorFactor[0], baseColorFactor[1], baseColorFactor[2], baseColorFactor[3]
+            roughness, metallic, hasMRTexture, hasNormalTexture,
+            baseColorFactor[0], baseColorFactor[1], baseColorFactor[2], baseColorFactor[3],
+            0.0, 0.0, 0.0, 0.0
         ]));
 
         this.materialBindGroup = device.createBindGroup({
@@ -95,6 +102,14 @@ export class Material {
                 {
                     binding: 4,
                     resource: mrTexture.sampler
+                },
+                {
+                    binding: 5,
+                    resource: normalTexture.image.createView()
+                },
+                {
+                    binding: 6,
+                    resource: normalTexture.sampler
                 }
             ]
         });
@@ -137,7 +152,13 @@ export class Primitive {
         const normalsArray = getFloatArray(gltfWithBuffers, gltfPrim.attributes.NORMAL);
         const uvsArray = getFloatArray(gltfWithBuffers, gltfPrim.attributes.TEXCOORD_0);
 
-        const numFloatsPerVert = 8;
+        // Load tangent data (vec4f: xyz = tangent direction, w = handedness +1/-1)
+        let tangentsArray: Float32Array | null = null;
+        if (gltfPrim.attributes.TANGENT != null) {
+            tangentsArray = getFloatArray(gltfWithBuffers, gltfPrim.attributes.TANGENT);
+        }
+
+        const numFloatsPerVert = 12; // pos(3) + nor(3) + uv(2) + tangent(4)
         const numVerts = positionsArray.length / 3;
         const vertsArray = new Float32Array(numVerts * numFloatsPerVert);
         for (let vertIdx = 0; vertIdx < numVerts; ++vertIdx) {
@@ -150,6 +171,19 @@ export class Primitive {
             vertsArray[vertStartIdx + 5] = normalsArray[vertIdx * 3 + 2];
             vertsArray[vertStartIdx + 6] = uvsArray[vertIdx * 2];
             vertsArray[vertStartIdx + 7] = uvsArray[vertIdx * 2 + 1];
+            // Tangent (vec4f)
+            if (tangentsArray) {
+                vertsArray[vertStartIdx + 8] = tangentsArray[vertIdx * 4];
+                vertsArray[vertStartIdx + 9] = tangentsArray[vertIdx * 4 + 1];
+                vertsArray[vertStartIdx + 10] = tangentsArray[vertIdx * 4 + 2];
+                vertsArray[vertStartIdx + 11] = tangentsArray[vertIdx * 4 + 3]; // handedness
+            } else {
+                // Default tangent along +X axis with positive handedness
+                vertsArray[vertStartIdx + 8] = 1.0;
+                vertsArray[vertStartIdx + 9] = 0.0;
+                vertsArray[vertStartIdx + 10] = 0.0;
+                vertsArray[vertStartIdx + 11] = 1.0;
+            }
         }
 
         this.indexBuffer = device.createBuffer({

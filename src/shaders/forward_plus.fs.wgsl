@@ -15,19 +15,23 @@ struct PBRParams {
     roughness: f32,
     metallic: f32,
     has_mr_texture: f32,
-    _pad1: f32,
+    has_normal_texture: f32,
     base_color_factor: vec4f,
+    _reserved: vec4f,
 }
 @group(${bindGroup_material}) @binding(2) var<uniform> pbrParams: PBRParams;
 @group(${bindGroup_material}) @binding(3) var metallicRoughnessTex: texture_2d<f32>;
 @group(${bindGroup_material}) @binding(4) var metallicRoughnessTexSampler: sampler;
+@group(${bindGroup_material}) @binding(5) var normalTex: texture_2d<f32>;
+@group(${bindGroup_material}) @binding(6) var normalTexSampler: sampler;
 
 struct FragmentInput
 {
     @builtin(position) fragcoord: vec4f,
     @location(0) pos_world: vec3f,
     @location(1) nor_world: vec3f,
-    @location(2) uv: vec2f
+    @location(2) uv: vec2f,
+    @location(3) tangent_world: vec4f
 }
 
 @fragment
@@ -50,7 +54,18 @@ fn main(in: FragmentInput) -> @location(0) vec4f
     }
     roughness = max(roughness, 0.04); // clamp to avoid singularity
 
-    let N = normalize(in.nor_world);
+    // Normal mapping: build TBN matrix and sample normal map
+    var N = normalize(in.nor_world);
+    if (pbrParams.has_normal_texture > 0.5) {
+        let T = normalize(in.tangent_world.xyz);
+        let B = cross(N, T) * in.tangent_world.w; // w = handedness
+        let tbn = mat3x3f(T, B, N);
+        // Sample normal map (stored as [0,1], convert to [-1,1])
+        let normalSample = textureSample(normalTex, normalTexSampler, in.uv).rgb;
+        let tangentNormal = normalSample * 2.0 - 1.0;
+        N = normalize(tbn * tangentNormal);
+    }
+
     let V = normalize(camera.camera_pos.xyz - in.pos_world);
 
     // ---- Cluster lookup ----

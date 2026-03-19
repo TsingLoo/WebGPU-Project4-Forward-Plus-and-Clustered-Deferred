@@ -89,13 +89,23 @@ export async function initWebGPU() {
                 binding: 4,
                 visibility: GPUShaderStage.FRAGMENT,
                 sampler: {}
+            },
+            { // normalTex
+                binding: 5,
+                visibility: GPUShaderStage.FRAGMENT,
+                texture: {}
+            },
+            { // normalTexSampler
+                binding: 6,
+                visibility: GPUShaderStage.FRAGMENT,
+                sampler: {}
             }
         ]
     });
 }
 
 export const vertexBufferLayout: GPUVertexBufferLayout = {
-    arrayStride: 32,
+    arrayStride: 48,
     attributes: [
         { // pos
             format: "float32x3",
@@ -111,6 +121,11 @@ export const vertexBufferLayout: GPUVertexBufferLayout = {
             format: "float32x2",
             offset: 24,
             shaderLocation: 2
+        },
+        { // tangent
+            format: "float32x4",
+            offset: 32,
+            shaderLocation: 3
         }
     ]
 };

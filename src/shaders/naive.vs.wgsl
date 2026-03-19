@@ -10,7 +10,8 @@ struct VertexInput
 {
     @location(0) pos: vec3f,
     @location(1) nor: vec3f,
-    @location(2) uv: vec2f
+    @location(2) uv: vec2f,
+    @location(3) tangent: vec4f
 }
 
 struct VertexOutput
@@ -18,7 +19,8 @@ struct VertexOutput
     @builtin(position) fragPos: vec4f,
     @location(0) pos: vec3f,
     @location(1) nor: vec3f,
-    @location(2) uv: vec2f
+    @location(2) uv: vec2f,
+    @location(3) tangent_world: vec4f
 }
 
 @vertex
@@ -29,7 +31,9 @@ fn main(in: VertexInput) -> VertexOutput
     var out: VertexOutput;
     out.fragPos = camera.view_proj_mat * modelPos;
     out.pos = modelPos.xyz / modelPos.w;
-    out.nor = in.nor;
+    out.nor = normalize((modelMat * vec4(in.nor, 0.0)).xyz);
     out.uv = in.uv;
+    // Transform tangent direction by model matrix, preserve handedness in w
+    out.tangent_world = vec4f(normalize((modelMat * vec4(in.tangent.xyz, 0.0)).xyz), in.tangent.w);
     return out;
 }
