@@ -21,7 +21,35 @@ function getFloatArray(gltfWithBuffers: GLTFWithBuffers, attribute: number) {
     const bufferView = gltf.bufferViews![accessor.bufferView!];
     const buffer = gltfWithBuffers.buffers[bufferView.buffer];
     const byteOffset = (accessor.byteOffset ?? 0) + (bufferView.byteOffset ?? 0) + buffer.byteOffset;
-    return new Float32Array(buffer.arrayBuffer, byteOffset, bufferView.byteLength / 4);
+
+    // Determine number of components per element from accessor type
+    const typeToComponents: Record<string, number> = {
+        'SCALAR': 1, 'VEC2': 2, 'VEC3': 3, 'VEC4': 4,
+        'MAT2': 4, 'MAT3': 9, 'MAT4': 16
+    };
+    const numComponents = typeToComponents[accessor.type] || 1;
+    const totalFloats = accessor.count * numComponents;
+
+    // If buffer view has byte stride and it differs from tightly packed,
+    // we need to extract data element-by-element
+    const tightStride = numComponents * 4; // 4 bytes per float
+    const byteStride = bufferView.byteStride ?? tightStride;
+
+    if (byteStride === tightStride) {
+        // Tightly packed — can create a direct view
+        return new Float32Array(buffer.arrayBuffer, byteOffset, totalFloats);
+    } else {
+        // Strided — extract element by element
+        const result = new Float32Array(totalFloats);
+        const dataView = new DataView(buffer.arrayBuffer);
+        for (let i = 0; i < accessor.count; i++) {
+            const elemOffset = byteOffset + i * byteStride;
+            for (let c = 0; c < numComponents; c++) {
+                result[i * numComponents + c] = dataView.getFloat32(elemOffset + c * 4, true);
+            }
+        }
+        return result;
+    }
 }
 
 class Texture {
@@ -63,6 +91,7 @@ export class Material {
         // Flag: does this material have a metallic-roughness texture?
         const hasMRTexture = (mrTexIndex != null && mrTexIndex < texturesLinear.length) ? 1.0 : 0.0;
         const hasNormalTexture = (normalTexIndex != null && normalTexIndex < texturesLinear.length) ? 1.0 : 0.0;
+
 
         // PBR params uniform: 48 bytes (3 vec4f)
         // vec4f[0]: roughness, metallic, hasMRTexture, hasNormalTexture

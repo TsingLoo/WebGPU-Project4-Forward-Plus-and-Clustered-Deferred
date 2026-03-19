@@ -38,11 +38,13 @@ fn main(in: FragmentInput) ->  GBufferOutput
         discard;
     }
 
-    // Per-pixel metallic/roughness from texture (glTF: G = roughness, B = metallic)
+    // Per-pixel metallic/roughness/AO from texture (glTF ORM packing: R = occlusion, G = roughness, B = metallic)
     var metallic = pbrParams.metallic;
     var roughness = pbrParams.roughness;
+    var ao = 1.0;
     if (pbrParams.has_mr_texture > 0.5) {
         let mrSample = textureSample(metallicRoughnessTex, metallicRoughnessTexSampler, in.uv);
+        ao = mrSample.r;              // ambient occlusion from R channel
         roughness = roughness * mrSample.g;
         metallic = metallic * mrSample.b;
     }
@@ -63,8 +65,8 @@ fn main(in: FragmentInput) ->  GBufferOutput
     output.normal = vec4f(N, 1.0); 
     output.position = vec4f(in.pos, 1.0);
 
-    // Store PBR params from material uniform
-    output.specular_material = vec4f(roughness, metallic, 0.0, 1.0);
+    // Store PBR params: R=roughness, G=metallic, B=ao
+    output.specular_material = vec4f(roughness, metallic, ao, 1.0);
     
     return output;
 }

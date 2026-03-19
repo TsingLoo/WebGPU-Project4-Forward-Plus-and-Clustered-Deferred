@@ -251,6 +251,67 @@ export class Environment {
         console.log("HDRI processed and IBL recomputed");
     }
 
+    // Clear IBL to uniform neutral ambient (removes all directional bias from environment)
+    public clearHDRI() {
+        // Generate a near-uniform cubemap by pointing the procedural sun straight down
+        // This minimizes sky gradient, giving near-uniform ambient from all directions
+        const paramsBuffer = device.createBuffer({
+            size: 16,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+        const paramsData = new ArrayBuffer(16);
+        new Uint32Array(paramsData, 0, 1).set([Environment.ENV_SIZE]);
+        // Sun pointing straight down → minimal sky gradient, near-uniform
+        new Float32Array(paramsData, 4, 3).set([0.0, -1.0, 0.0]);
+        device.queue.writeBuffer(paramsBuffer, 0, paramsData);
+
+        const module = device.createShaderModule({
+            label: "generate cubemap shader",
+            code: shaders.generateCubemapSrc,
+        });
+
+        const bindGroupLayout = device.createBindGroupLayout({
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba16float', viewDimension: '2d-array' } },
+                { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+            ]
+        });
+
+        const outputView = this.envCubemap.createView({
+            dimension: '2d-array',
+            arrayLayerCount: 6,
+        });
+
+        const bindGroup = device.createBindGroup({
+            layout: bindGroupLayout,
+            entries: [
+                { binding: 0, resource: outputView },
+                { binding: 1, resource: { buffer: paramsBuffer } },
+            ]
+        });
+
+        const pipeline = device.createComputePipeline({
+            layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
+            compute: { module, entryPoint: 'main' }
+        });
+
+        const encoder = device.createCommandEncoder();
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, bindGroup);
+        pass.dispatchWorkgroups(
+            Math.ceil(Environment.ENV_SIZE / 8),
+            Math.ceil(Environment.ENV_SIZE / 8),
+            6
+        );
+        pass.end();
+        device.queue.submit([encoder.finish()]);
+
+        this.computeIrradiance();
+        this.computePrefilteredMap();
+        console.log("IBL cleared to minimal uniform ambient");
+    }
+
     private computeIrradiance() {
         const module = device.createShaderModule({
             label: "irradiance convolution shader",

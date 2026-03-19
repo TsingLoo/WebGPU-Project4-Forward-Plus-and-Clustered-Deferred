@@ -32,7 +32,7 @@ export class DDGI {
     gridMax: [number, number, number] = [14, 7, 7];
 
     // Hysteresis
-    irradianceHysteresis = 0.97;
+    irradianceHysteresis = 0.85;
     visibilityHysteresis = 0.97;
     normalBias = 0.25;
     viewBias = 0.1;

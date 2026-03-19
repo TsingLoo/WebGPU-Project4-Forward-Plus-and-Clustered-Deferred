@@ -47,6 +47,7 @@ fn main(
     
     let roughness = max(specularData.r, 0.04);
     let metallic = specularData.g;
+    let ao = specularData.b; // ambient occlusion from G-buffer
 
     let N = normalize(nor_world);
     let V = normalize(camera.camera_pos.xyz - pos_world);
@@ -107,10 +108,18 @@ fn main(
     let kS = F;
     let kD = (vec3f(1.0) - kS) * (1.0 - metallic);
 
-    // Diffuse IBL — blend DDGI with IBL when enabled
+    // Diffuse IBL from preconvolved irradiance map
     let iblIrradiance = textureSampleLevel(irradianceMap, iblSampler, N, 0.0).rgb;
-    var diffuseIBL = iblIrradiance * albedo;
 
+    // Specular IBL (split-sum)
+    let R = reflect(-V, N);
+    let maxLod = 4.0;
+    let prefilteredColor = textureSampleLevel(prefilteredMap, iblSampler, R, roughness * maxLod).rgb;
+    let brdfVal = textureSampleLevel(brdfLutTex, iblSampler, vec2f(NdotV, roughness), 0.0).rg;
+    let specularIBL = prefilteredColor * (F * brdfVal.x + brdfVal.y);
+
+    // Build ambient: scale IBL independently from DDGI
+    var diffuseAmbient = vec3f(0.0);
     if (ddgiParams.ddgi_enabled.x > 0.5) {
         // Inline DDGI irradiance sampling (trilinear probe interpolation + Chebyshev visibility)
         let ddgi_spacing = ddgiParams.grid_spacing.xyz;
@@ -168,19 +177,17 @@ fn main(
         }
         if (ddgi_totalW > 0.0) { ddgi_totalIrr /= ddgi_totalW; }
 
-        // Blend: IBL provides base ambient, DDGI adds indirect bounce light
+        // DDGI bounce at full strength + small IBL fill for areas probes don't reach
         let ddgiBounce = ddgi_totalIrr * albedo;
-        diffuseIBL = iblIrradiance * albedo * 0.3 + ddgiBounce * 0.7;
+        let iblFill = iblIrradiance * albedo * 0.3;
+        diffuseAmbient = ddgiBounce + iblFill;
+    } else {
+        // No DDGI: use IBL irradiance with moderate scaling
+        diffuseAmbient = iblIrradiance * albedo * 0.7;
     }
 
-    // Specular IBL (always from prefiltered env map)
-    let R = reflect(-V, N);
-    let maxLod = 4.0;
-    let prefilteredColor = textureSampleLevel(prefilteredMap, iblSampler, R, roughness * maxLod).rgb;
-    let brdfVal = textureSampleLevel(brdfLutTex, iblSampler, vec2f(NdotV, roughness), 0.0).rg;
-    let specularIBL = prefilteredColor * (F * brdfVal.x + brdfVal.y);
-
-    let ambient = kD * diffuseIBL + specularIBL;
+    // Combine: DDGI diffuse (unscaled) + specular IBL (scaled down)
+    let ambient = (kD * diffuseAmbient + specularIBL * 0.6) * ao;
     let finalColor = ambient + Lo;
 
     // Tone mapping (Reinhard)

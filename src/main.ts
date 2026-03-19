@@ -318,10 +318,14 @@ fileInput.addEventListener('change', async (event) => {
 const uploadController = {
     uploadHDRI: () => {
         fileInput.click();
+    },
+    resetHDRI: () => {
+        stage.environment.clearHDRI();
     }
 };
 
 gui.add(uploadController, 'uploadHDRI').name('Upload HDRI (.hdr/.exr)');
+gui.add(uploadController, 'resetHDRI').name('Clear HDRI');
 
 // --- Model upload (.gltf / .glb) ---
 const modelFileInput = document.createElement('input');
@@ -397,6 +401,9 @@ ddgiFolder.add(stage.ddgi, 'irradianceHysteresis', 0.8, 0.999).step(0.001).name(
 ddgiFolder.add(stage.ddgi, 'normalBias', 0.0, 1.0).step(0.01).name('Normal Bias').onChange(() => {
     stage.ddgi.updateUniforms();
 });
+ddgiFolder.add(stage.ddgi, 'debugMode', { 'Off': 0, 'Raw Atlas': 1, 'Decoded Irr': 2, 'IBL Only': 3, 'Mapped Normal': 4, 'Vertex Normal': 5, 'Tangent': 6, 'NdotL': 7 }).name('Debug View').onChange(() => {
+    stage.ddgi.updateUniforms();
+});
 ddgiFolder.open();
 
 // Sun Light controls
@@ -404,7 +411,7 @@ const sunFolder = gui.addFolder('Sun Light');
 sunFolder.add(stage, 'sunEnabled').name('Enabled').onChange(() => {
     stage.updateSunLight();
 });
-sunFolder.add(stage, 'sunIntensity', 0.0, 10.0).step(0.1).name('Intensity').onChange(() => {
+sunFolder.add(stage, 'sunIntensity', 0.0, 20.0).step(0.1).name('Intensity').onChange(() => {
     stage.updateSunLight();
 });
 const sunDirProxy = { x: stage.sunDirection[0], y: stage.sunDirection[1], z: stage.sunDirection[2] };

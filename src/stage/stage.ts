@@ -17,9 +17,9 @@ export class Stage {
 
     // Sun light
     sunLightBuffer: GPUBuffer;
-    sunDirection: [number, number, number] = [0.5, 0.8, 0.3]; // direction TO light
+    sunDirection: [number, number, number] = [-0.17, 0.27, 0.05]; // direction TO light
     sunColor: [number, number, number] = [1.0, 0.95, 0.85];   // warm white
-    sunIntensity: number = 3.0;
+    sunIntensity: number = 10.0;
     sunEnabled: boolean = true;
 
     constructor(scene: Scene, lights: Lights, camera: Camera, stats: Stats, environment: Environment) {

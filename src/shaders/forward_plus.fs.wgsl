@@ -54,11 +54,14 @@ fn main(in: FragmentInput) -> @location(0) vec4f
 
     let albedo = diffuseColor.rgb;
 
-    // Per-pixel metallic/roughness from texture (glTF: G = roughness, B = metallic)
+    // Per-pixel metallic/roughness/AO from texture (glTF ORM packing: R = occlusion, G = roughness, B = metallic)
     var metallic = pbrParams.metallic;
     var roughness = pbrParams.roughness;
+    var ao = 1.0;
     if (pbrParams.has_mr_texture > 0.5) {
         let mrSample = textureSample(metallicRoughnessTex, metallicRoughnessTexSampler, in.uv);
+        // glTF spec: metallicRoughness texture has G=roughness, B=metallic
+        // Occlusion is a separate texture (not bound here), so keep ao = 1.0
         roughness = roughness * mrSample.g; // scalar * texture per glTF spec
         metallic = metallic * mrSample.b;
     }
@@ -66,9 +69,22 @@ fn main(in: FragmentInput) -> @location(0) vec4f
 
     // Normal mapping: build TBN matrix and sample normal map
     var N = normalize(in.nor_world);
+    let vertexNormal = N; // save for debug
     if (pbrParams.has_normal_texture > 0.5) {
-        let T = normalize(in.tangent_world.xyz);
-        let B = cross(N, T) * in.tangent_world.w; // w = handedness
+        // Re-orthogonalize tangent against normal (Gram-Schmidt)
+        let T_raw = in.tangent_world.xyz - N * dot(in.tangent_world.xyz, N);
+        let T_len = length(T_raw);
+        var T = vec3f(0.0);
+        if (T_len > 0.001) {
+            T = T_raw / T_len;
+        } else {
+            // Degenerate tangent - pick one orthogonal to N
+            let refVec = select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(N.y) > 0.9);
+            T = normalize(cross(N, refVec));
+        }
+        // Handedness: default to 1.0 if tangent.w is zero (missing data)
+        let handedness = select(in.tangent_world.w, 1.0, abs(in.tangent_world.w) < 0.5);
+        let B = normalize(cross(T, N)) * handedness;
         let tbn = mat3x3f(T, B, N);
         // Sample normal map (stored as [0,1], convert to [-1,1])
         let normalSample = textureSample(normalTex, normalTexSampler, in.uv).rgb;
@@ -134,10 +150,18 @@ fn main(in: FragmentInput) -> @location(0) vec4f
     let kS = F;
     let kD = (vec3f(1.0) - kS) * (1.0 - metallic);
 
-    // Diffuse IBL — blend DDGI with IBL when enabled
+    // Diffuse IBL from preconvolved irradiance map
     let iblIrradiance = textureSample(irradianceMap, iblSampler, N).rgb;
-    var diffuseIBL = iblIrradiance * albedo;
 
+    // Specular IBL (split-sum)
+    let R = reflect(-V, N);
+    let maxLod = 4.0; // PREFILTER_MIP_LEVELS - 1
+    let prefilteredColor = textureSampleLevel(prefilteredMap, iblSampler, R, roughness * maxLod).rgb;
+    let brdf = textureSample(brdfLut, iblSampler, vec2f(NdotV, roughness)).rg;
+    let specularIBL = prefilteredColor * (F * brdf.x + brdf.y);
+
+    // Build ambient: scale IBL independently from DDGI
+    var diffuseAmbient = vec3f(0.0);
     if (ddgiParams.ddgi_enabled.x > 0.5) {
         // Inline DDGI irradiance sampling (trilinear probe interpolation + Chebyshev visibility)
         let ddgi_spacing = ddgiParams.grid_spacing.xyz;
@@ -187,7 +211,9 @@ fn main(in: FragmentInput) -> @location(0) vec4f
                     p_w = max(p_w, 0.0001);
 
                     let p_irrUV = ddgiIrradianceTexelCoord(p_idx, octEncode(N), ddgiParams);
-                    let p_irr = textureSampleLevel(ddgiIrradianceAtlas, ddgiSampler, p_irrUV, 0.0).rgb;
+                    let p_irr_encoded = textureSampleLevel(ddgiIrradianceAtlas, ddgiSampler, p_irrUV, 0.0).rgb;
+                    // Decode from perceptual gamma space (pow 5.0) to linear
+                    let p_irr = pow(max(p_irr_encoded, vec3f(0.0)), vec3f(5.0));
                     ddgi_totalIrr += p_irr * p_w;
                     ddgi_totalW += p_w;
                 }
@@ -195,19 +221,81 @@ fn main(in: FragmentInput) -> @location(0) vec4f
         }
         if (ddgi_totalW > 0.0) { ddgi_totalIrr /= ddgi_totalW; }
 
-        // Blend: IBL provides base ambient, DDGI adds indirect bounce light
+        // DDGI provides indirect diffuse + IBL floor to prevent extreme darkness
+        // in areas where probes have limited data (screen-space tracing limitation)
         let ddgiBounce = ddgi_totalIrr * albedo;
-        diffuseIBL = iblIrradiance * albedo * 0.3 + ddgiBounce * 0.7;
+        let iblFloor = iblIrradiance * albedo * 0.25;
+        diffuseAmbient = max(ddgiBounce, iblFloor);
+    } else {
+        // No DDGI: use IBL irradiance with moderate scaling
+        diffuseAmbient = iblIrradiance * albedo * 1.0;
     }
 
-    // Specular IBL
-    let R = reflect(-V, N);
-    let maxLod = 4.0; // PREFILTER_MIP_LEVELS - 1
-    let prefilteredColor = textureSampleLevel(prefilteredMap, iblSampler, R, roughness * maxLod).rgb;
-    let brdf = textureSample(brdfLut, iblSampler, vec2f(NdotV, roughness)).rg;
-    let specularIBL = prefilteredColor * (F * brdf.x + brdf.y);
+    // ---- DDGI Debug Visualization ----
+    let debugMode = i32(ddgiParams.ddgi_enabled.y);
+    if (debugMode == 1) {
+        // Mode 1: Raw DDGI irradiance (should NOT be black if probes have data)
+        if (ddgiParams.ddgi_enabled.x > 0.5) {
+            // Re-sample center probe for this fragment to show raw irradiance
+            let dbg_spacing = ddgiParams.grid_spacing.xyz;
+            let dbg_gridMin = ddgiParams.grid_min.xyz;
+            let dbg_fractIdx = (in.pos_world - dbg_gridMin) / dbg_spacing;
+            let dbg_baseIdx = clamp(vec3i(floor(dbg_fractIdx)), vec3i(0), ddgiParams.grid_count.xyz - vec3i(1));
+            let dbg_probeIdx = ddgiProbeLinearIndex(dbg_baseIdx, ddgiParams);
+            let dbg_irrUV = ddgiIrradianceTexelCoord(dbg_probeIdx, octEncode(N), ddgiParams);
+            let dbg_raw = textureSampleLevel(ddgiIrradianceAtlas, ddgiSampler, dbg_irrUV, 0.0).rgb;
+            // Show raw atlas value (gamma-encoded) amplified
+            return vec4f(dbg_raw * 3.0, 1.0);
+        }
+        return vec4f(1.0, 0.0, 1.0, 1.0); // Magenta = DDGI disabled
+    }
+    if (debugMode == 2) {
+        // Mode 2: Decoded DDGI irradiance (trilinear sampled, after pow 5)
+        if (ddgiParams.ddgi_enabled.x > 0.5) {
+            let dbg2_spacing = ddgiParams.grid_spacing.xyz;
+            let dbg2_gridMin = ddgiParams.grid_min.xyz;
+            let dbg2_fractIdx = (in.pos_world - dbg2_gridMin) / dbg2_spacing;
+            let dbg2_baseIdx = clamp(vec3i(floor(dbg2_fractIdx)), vec3i(0), ddgiParams.grid_count.xyz - vec3i(1));
+            let dbg2_probeIdx = ddgiProbeLinearIndex(dbg2_baseIdx, ddgiParams);
+            let dbg2_irrUV = ddgiIrradianceTexelCoord(dbg2_probeIdx, octEncode(N), ddgiParams);
+            let dbg2_encoded = textureSampleLevel(ddgiIrradianceAtlas, ddgiSampler, dbg2_irrUV, 0.0).rgb;
+            let dbg2_decoded = pow(max(dbg2_encoded, vec3f(0.0)), vec3f(5.0));
+            let dbg2_mapped = dbg2_decoded / (dbg2_decoded + vec3f(1.0));
+            return vec4f(pow(dbg2_mapped, vec3f(1.0/2.2)), 1.0);
+        }
+        return vec4f(0.0, 1.0, 1.0, 1.0); // Cyan = no DDGI data
+    }
+    if (debugMode == 3) {
+        // Mode 3: IBL irradiance only
+        let dbg_ibl = iblIrradiance;
+        let dbg_mapped2 = dbg_ibl / (dbg_ibl + vec3f(1.0));
+        return vec4f(pow(dbg_mapped2, vec3f(1.0/2.2)), 1.0);
+    }
+    if (debugMode == 4) {
+        // Mode 4: Final mapped world-space normal as RGB
+        return vec4f(N * 0.5 + 0.5, 1.0);
+    }
+    if (debugMode == 5) {
+        // Mode 5: Vertex normal (before normal mapping) as RGB
+        return vec4f(vertexNormal * 0.5 + 0.5, 1.0);
+    }
+    if (debugMode == 6) {
+        // Mode 6: Tangent vector as RGB
+        return vec4f(normalize(in.tangent_world.xyz) * 0.5 + 0.5, 1.0);
+    }
+    if (debugMode == 7) {
+        // Mode 7: NdotL (sun) - bright = facing sun, dark = away
+        let sunDir = normalize(sunLight.direction.xyz);
+        let ndotl = max(dot(N, sunDir), 0.0);
+        return vec4f(vec3f(ndotl), 1.0);
+    }
 
-    let ambient = kD * diffuseIBL + specularIBL;
+    // Combine: diffuse ambient + specular IBL
+    // When DDGI is on, reduce specular IBL since the cubemap doesn't match interior lighting
+    // DDGI only provides diffuse indirect; specular IBL from outdoor cubemap
+    // creates unrealistic reflections on interior surfaces, so disable it with DDGI
+    let specIBLScale = select(0.6, 0.0, ddgiParams.ddgi_enabled.x > 0.5);
+    let ambient = (kD * diffuseAmbient + specularIBL * specIBLScale) * ao;
 
     let finalColor = ambient + Lo;
 

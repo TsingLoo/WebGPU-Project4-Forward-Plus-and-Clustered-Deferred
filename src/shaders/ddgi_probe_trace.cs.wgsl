@@ -126,7 +126,7 @@ fn main(
                 }
 
                 // Add ambient term so shadowed areas still contribute some bounce
-                hitLighting += vec3f(0.15);
+                hitLighting += vec3f(0.3);
 
                 hitRadiance = hitAlbedo * hitLighting;
                 hitDist = hitDistCandidate;
@@ -138,6 +138,8 @@ fn main(
     // If miss, sample environment sky
     if (hitDist < 0.0) {
         hitRadiance = textureSampleLevel(envMap, envSampler, rotatedDir, 0.0).rgb;
+        // Clamp extreme HDR values (sun disk = 15.0) but allow normal sky brightness through
+        hitRadiance = min(hitRadiance, vec3f(3.0));
         hitDist = 1000.0; // far
     }
 

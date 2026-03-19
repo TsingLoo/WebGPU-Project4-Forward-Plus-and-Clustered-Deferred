@@ -81,10 +81,16 @@ fn main(
     let atlasX = probeCol * i32(IRRADIANCE_WITH_BORDER) + 1 + i32(texelX);
     let atlasY = probeRow * i32(IRRADIANCE_WITH_BORDER) + 1 + i32(texelY);
 
-    // Hysteresis blending with previous value
+    // Encode to perceptual space (pow 1/5) before hysteresis blending.
+    // This is the standard DDGI technique from NVIDIA RTXGI that prevents
+    // dark values from being overwhelmed by bright values during blending.
+    let GAMMA = 1.0 / 5.0;
+    let INV_GAMMA = 5.0;
+    let newEncoded = pow(max(weightedIrradiance, vec3f(0.0)), vec3f(GAMMA));
+
     let prevColor = textureLoad(irradianceAtlasRead, vec2i(atlasX, atlasY), 0).rgb;
     let hysteresis = ddgi.hysteresis.x;
-    let blended = mix(weightedIrradiance, prevColor, hysteresis);
+    let blended = mix(newEncoded, prevColor, hysteresis);
 
     textureStore(irradianceAtlasWrite, vec2i(atlasX, atlasY), vec4f(blended, 1.0));
 }
