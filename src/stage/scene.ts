@@ -40,15 +40,16 @@ export class Material {
 
     materialBindGroup: GPUBindGroup;
 
-    constructor(gltfMaterial: GLTFMaterial, textures: Texture[], defaultTexture: Texture) {
+    constructor(gltfMaterial: GLTFMaterial, texturesSRGB: Texture[], texturesLinear: Texture[], defaultTextureSRGB: Texture, defaultTextureLinear: Texture) {
         this.id = Material.nextId++;
 
+        // BaseColor texture uses sRGB (gamma-encoded color data)
         const texIndex = gltfMaterial.pbrMetallicRoughness?.baseColorTexture?.index;
-        const diffuseTexture = (texIndex != null && texIndex < textures.length) ? textures[texIndex] : defaultTexture;
+        const diffuseTexture = (texIndex != null && texIndex < texturesSRGB.length) ? texturesSRGB[texIndex] : defaultTextureSRGB;
 
-        // Metallic-roughness texture (glTF: green channel = roughness, blue channel = metallic)
+        // Metallic-roughness texture uses linear (non-color data: G = roughness, B = metallic)
         const mrTexIndex = gltfMaterial.pbrMetallicRoughness?.metallicRoughnessTexture?.index;
-        const mrTexture = (mrTexIndex != null && mrTexIndex < textures.length) ? textures[mrTexIndex] : defaultTexture;
+        const mrTexture = (mrTexIndex != null && mrTexIndex < texturesLinear.length) ? texturesLinear[mrTexIndex] : defaultTextureLinear;
 
         // Extract PBR scalar factors from glTF
         // Note: glTF spec defaults are both 1.0, but Sponza materials are dielectric
@@ -58,7 +59,7 @@ export class Material {
         const baseColorFactor = gltfMaterial.pbrMetallicRoughness?.baseColorFactor ?? [1.0, 1.0, 1.0, 1.0];
 
         // Flag: does this material have a metallic-roughness texture?
-        const hasMRTexture = (mrTexIndex != null && mrTexIndex < textures.length) ? 1.0 : 0.0;
+        const hasMRTexture = (mrTexIndex != null && mrTexIndex < texturesLinear.length) ? 1.0 : 0.0;
 
         // PBR params uniform: roughness, metallic, hasMRTexture, pad, baseColorFactor (vec4f) = 32 bytes
         const pbrParamsBuffer = device.createBuffer({
@@ -242,7 +243,23 @@ export class Node {
     }
 }
 
-function createTexture(imageBitmap: ImageBitmap): GPUTexture {
+function createTextureSRGB(imageBitmap: ImageBitmap): GPUTexture {
+    let texture = device.createTexture({
+        size: [imageBitmap.width, imageBitmap.height],
+        format: 'rgba8unorm-srgb',
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
+    });
+
+    device.queue.copyExternalImageToTexture(
+        { source: imageBitmap },
+        { texture: texture },
+        { width: imageBitmap.width, height: imageBitmap.height }
+    );
+
+    return texture;
+}
+
+function createTextureLinear(imageBitmap: ImageBitmap): GPUTexture {
     let texture = device.createTexture({
         size: [imageBitmap.width, imageBitmap.height],
         format: 'rgba8unorm',
@@ -336,27 +353,43 @@ export class Scene {
     private processGltf(gltfWithBuffers: GLTFWithBuffers) {
         const gltf = gltfWithBuffers.json;
 
-        // Create a default white 1x1 texture for materials without a baseColorTexture
-        const defaultGpuTex = device.createTexture({
+        // Create default white 1x1 textures (sRGB for baseColor, linear for MR)
+        const defaultGpuTexSRGB = device.createTexture({
+            size: [1, 1],
+            format: 'rgba8unorm-srgb',
+            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        device.queue.writeTexture(
+            { texture: defaultGpuTexSRGB },
+            new Uint8Array([255, 255, 255, 255]),
+            { bytesPerRow: 4 },
+            [1, 1]
+        );
+        const defaultGpuTexLinear = device.createTexture({
             size: [1, 1],
             format: 'rgba8unorm',
             usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
         });
         device.queue.writeTexture(
-            { texture: defaultGpuTex },
+            { texture: defaultGpuTexLinear },
             new Uint8Array([255, 255, 255, 255]),
             { bytesPerRow: 4 },
             [1, 1]
         );
         const defaultSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
-        const defaultTexture = new Texture(defaultGpuTex, defaultSampler);
+        const defaultTextureSRGB = new Texture(defaultGpuTexSRGB, defaultSampler);
+        const defaultTextureLinear = new Texture(defaultGpuTexLinear, defaultSampler);
 
-        let sceneTextures: Texture[] = [];
+        // Build sRGB and linear image arrays from all images
+        let sceneTexturesSRGB: Texture[] = [];  // for baseColor (sRGB encoded)
+        let sceneTexturesLinear: Texture[] = []; // for metallic-roughness (linear data)
         {
-            let sceneImages: GPUTexture[] = [];
+            let sceneImagesSRGB: GPUTexture[] = [];
+            let sceneImagesLinear: GPUTexture[] = [];
             if (gltfWithBuffers.images) {
                 for (let gltfImage of gltfWithBuffers.images) {
-                    sceneImages.push(createTexture(gltfImage as ImageBitmap));
+                    sceneImagesSRGB.push(createTextureSRGB(gltfImage as ImageBitmap));
+                    sceneImagesLinear.push(createTextureLinear(gltfImage as ImageBitmap));
                 }
             }
 
@@ -369,9 +402,11 @@ export class Scene {
 
             if (gltf.textures) {
                 for (let gltfTexture of gltf.textures) {
-                    const img = (gltfTexture.source != null) ? sceneImages[gltfTexture.source] : defaultGpuTex;
                     const smp = (gltfTexture.sampler != null && gltfTexture.sampler < sceneSamplers.length) ? sceneSamplers[gltfTexture.sampler] : defaultSampler;
-                    sceneTextures.push(new Texture(img, smp));
+                    const imgSRGB = (gltfTexture.source != null) ? sceneImagesSRGB[gltfTexture.source] : defaultGpuTexSRGB;
+                    const imgLinear = (gltfTexture.source != null) ? sceneImagesLinear[gltfTexture.source] : defaultGpuTexLinear;
+                    sceneTexturesSRGB.push(new Texture(imgSRGB, smp));
+                    sceneTexturesLinear.push(new Texture(imgLinear, smp));
                 }
             }
         }
@@ -379,7 +414,7 @@ export class Scene {
         let sceneMaterials: Material[] = [];
         if (gltf.materials) {
             for (let gltfMaterial of gltf.materials) {
-                sceneMaterials.push(new Material(gltfMaterial, sceneTextures, defaultTexture));
+                sceneMaterials.push(new Material(gltfMaterial, sceneTexturesSRGB, sceneTexturesLinear, defaultTextureSRGB, defaultTextureLinear));
             }
         }
 
