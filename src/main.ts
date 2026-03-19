@@ -8,10 +8,17 @@ import { NaiveRenderer } from './renderers/naive';
 import { ForwardPlusRenderer } from './renderers/forward_plus';
 import { ClusteredDeferredRenderer } from './renderers/clustered_deferred';
 
+// @ts-ignore
+import parseHdr from 'parse-hdr';
+// @ts-ignore
+import parseExr from 'parse-exr';
+
+const canvas = document.getElementById('webgpu-canvas') as HTMLCanvasElement;
 import { setupLoaders, Scene } from './stage/scene';
 import { Lights } from './stage/lights';
 import { Camera } from './stage/camera';
 import { Stage } from './stage/stage';
+import { Environment } from './stage/environment';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const monitorTime = 8.0;
@@ -25,6 +32,7 @@ await scene.loadGltf('./scenes/sponza/Sponza.gltf');
 
 const camera = new Camera();
 const lights = new Lights(camera);
+const environment = new Environment();
 
 const stats = new Stats();
 
@@ -167,7 +175,7 @@ const benchmarkController = {
 
 gui.add(benchmarkController, 'runBenchmark').name('Run Full Benchmark');
 
-const stage = new Stage(scene, lights, camera, stats);
+const stage = new Stage(scene, lights, camera, stats, environment);
 
 var renderer: Renderer | undefined;
 
@@ -186,6 +194,193 @@ function setRenderer(mode: string) {
             break;
     }
 }
+
+// Helper: parse HDR file and return RGBA Float32Array + dimensions
+function parseHdrFile(buffer: ArrayBuffer): { rgbaData: Float32Array, width: number, height: number } {
+    const parsedLayout = parseHdr(buffer);
+
+    let width: number, height: number;
+    let data: Float32Array;
+
+    if (parsedLayout.shape && parsedLayout.data) {
+        width = parsedLayout.shape[0];
+        height = parsedLayout.shape[1];
+        data = parsedLayout.data;
+    } else {
+        throw new Error("Invalid HDR file format");
+    }
+
+    // parse-hdr returns RGBA (4 channels) already
+    const rgbaData = new Float32Array(width * height * 4);
+    if (data.length === width * height * 3) {
+        for (let i = 0; i < width * height; i++) {
+            rgbaData[i * 4 + 0] = data[i * 3 + 0];
+            rgbaData[i * 4 + 1] = data[i * 3 + 1];
+            rgbaData[i * 4 + 2] = data[i * 3 + 2];
+            rgbaData[i * 4 + 3] = 1.0;
+        }
+    } else if (data.length === width * height * 4) {
+        rgbaData.set(data);
+    } else {
+        throw new Error(`HDRI data length ${data.length} does not match dimensions ${width}x${height}`);
+    }
+
+    return { rgbaData, width, height };
+}
+
+// Helper: parse EXR file and return RGBA Float32Array + dimensions
+function parseExrFile(buffer: ArrayBuffer): { rgbaData: Float32Array, width: number, height: number } {
+    const FloatType = 1015;
+    const RGBAFormat = 1023;
+    const parsed = parseExr(buffer, FloatType);
+
+    const { data, width, height, format } = parsed;
+    const numPixels = width * height;
+
+    let rgbaData: Float32Array;
+
+    if (format === RGBAFormat) {
+        // Data is RGBA, 4 floats per pixel
+        if (data.length === numPixels * 4) {
+            rgbaData = data as Float32Array;
+        } else {
+            // Data might be RGB (3 floats per pixel) even with RGBA format flag
+            const channels = data.length / numPixels;
+            rgbaData = new Float32Array(numPixels * 4);
+            if (channels === 3) {
+                for (let i = 0; i < numPixels; i++) {
+                    rgbaData[i * 4 + 0] = data[i * 3 + 0];
+                    rgbaData[i * 4 + 1] = data[i * 3 + 1];
+                    rgbaData[i * 4 + 2] = data[i * 3 + 2];
+                    rgbaData[i * 4 + 3] = 1.0;
+                }
+            } else {
+                throw new Error(`Unexpected EXR channel count: ${channels}`);
+            }
+        }
+    } else {
+        // Single channel or other format
+        throw new Error(`Unsupported EXR format code: ${format}. Expected RGBA (1023).`);
+    }
+
+    // parse-exr outputs rows bottom-to-top (OpenGL convention)
+    // Flip to top-to-bottom to match .hdr convention and our shader's V-flip
+    const floatsPerRow = width * 4;
+    const tempRow = new Float32Array(floatsPerRow);
+    for (let y = 0; y < Math.floor(height / 2); y++) {
+        const topOffset = y * floatsPerRow;
+        const bottomOffset = (height - 1 - y) * floatsPerRow;
+        // Swap rows
+        tempRow.set(rgbaData.subarray(topOffset, topOffset + floatsPerRow));
+        rgbaData.set(rgbaData.subarray(bottomOffset, bottomOffset + floatsPerRow), topOffset);
+        rgbaData.set(tempRow, bottomOffset);
+    }
+
+    return { rgbaData, width, height };
+}
+
+const fileInput = document.createElement('input');
+fileInput.type = 'file';
+fileInput.accept = '.hdr,.exr';
+fileInput.style.display = 'none';
+document.body.appendChild(fileInput);
+
+fileInput.addEventListener('change', async (event) => {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+
+    try {
+        const fileName = file.name.toLowerCase();
+        const buffer = await file.arrayBuffer();
+
+        let rgbaData: Float32Array;
+        let width: number;
+        let height: number;
+
+        if (fileName.endsWith('.hdr')) {
+            ({ rgbaData, width, height } = parseHdrFile(buffer));
+        } else if (fileName.endsWith('.exr')) {
+            ({ rgbaData, width, height } = parseExrFile(buffer));
+        } else {
+            alert('Unsupported file format. Please upload .hdr or .exr');
+            return;
+        }
+
+        console.log(`[HDRI] Loaded ${file.name}: ${width}x${height}, data length: ${rgbaData.length}`);
+
+        await stage.environment.loadHDRI(rgbaData, width, height);
+    } catch (e) {
+        console.error("Failed to load HDRI:", e);
+        alert("Failed to load HDRI: " + String(e));
+    }
+});
+
+const uploadController = {
+    uploadHDRI: () => {
+        fileInput.click();
+    }
+};
+
+gui.add(uploadController, 'uploadHDRI').name('Upload HDRI (.hdr/.exr)');
+
+// --- Model upload (.gltf / .glb) ---
+const modelFileInput = document.createElement('input');
+modelFileInput.type = 'file';
+modelFileInput.accept = '.gltf,.glb';
+modelFileInput.style.display = 'none';
+document.body.appendChild(modelFileInput);
+
+modelFileInput.addEventListener('change', async (event) => {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+
+    try {
+        const fileName = file.name.toLowerCase();
+        if (!fileName.endsWith('.gltf') && !fileName.endsWith('.glb')) {
+            alert('Unsupported format. Please upload .gltf or .glb');
+            return;
+        }
+
+        console.log(`[Model] Loading ${file.name}...`);
+
+        // Read file as ArrayBuffer and parse directly
+        const buffer = await file.arrayBuffer();
+
+        // Replace the current scene
+        const newScene = new Scene();
+        await newScene.loadGltfBuffer(buffer);
+
+        // Update stage with new scene
+        stage.scene = newScene;
+
+        // Disable random point lights (designed for Sponza) to avoid color artifacts
+        lights.numLights = 0;
+        lights.updateLightSetUniformNumLights();
+        lightNumSlider.updateDisplay();
+        lightCountController.updateDisplay();
+
+        // Re-create renderer to pick up the new scene
+        if (renderModeController) {
+            setRenderer(renderModeController.getValue());
+        }
+
+        console.log(`[Model] Successfully loaded ${file.name}`);
+    } catch (e) {
+        console.error("Failed to load model:", e);
+        alert("Failed to load model: " + String(e));
+    }
+
+    // Reset the input so the same file can be re-selected
+    modelFileInput.value = '';
+});
+
+const modelUploadController = {
+    loadModel: () => {
+        modelFileInput.click();
+    }
+};
+
+gui.add(modelUploadController, 'loadModel').name('Load Model (.gltf/.glb)');
 
 const renderModes = { naive: 'naive', forwardPlus: 'forward+', clusteredDeferred: 'clustered deferred' };
 let renderModeController = gui.add({ mode: renderModes.forwardPlus }, 'mode', renderModes);

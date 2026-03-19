@@ -3,8 +3,6 @@ import * as shaders from '../shaders/shaders';
 import { Stage } from '../stage/stage';
 
 export class ClusteredDeferredRenderer extends renderer.Renderer {
-// TODO-2: add layouts, pipelines, textures, etc. needed for Forward+ here
-    // you may need extra uniforms such as the camera view matrix and the canvas resolution
     depthTexture: GPUTexture;
     depthTextureView: GPUTextureView;
 
@@ -23,11 +21,9 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
     shadingOutputDeviceTexture: GPUTexture;
     shadingOutputDeviceTextureView: GPUTextureView;
 
-    //the index of the first light in each tile and the number of lights in each tile
     tileOffsetsDeviceBuffer: GPUBuffer;
     globalLightIndicesDeviceBuffer: GPUBuffer;
     zeroDeviceBuffer: GPUBuffer;
-
     clusterSetDeviceBuffer: GPUBuffer;
 
     zPrepassPipeline: GPURenderPipeline;
@@ -42,8 +38,6 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
 
     shadingBindGroupLayout: GPUBindGroupLayout; 
     shadingBindGroup: GPUBindGroup;
-    //shadingPipeline: GPURenderPipeline;
-
     shadingComputePipeline: GPUComputePipeline;
 
     blitSampler: GPUSampler;
@@ -51,12 +45,16 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
     blitBindGroup: GPUBindGroup;
     blitPipeline: GPURenderPipeline;
 
+    skyboxPipeline: GPURenderPipeline;
+    skyboxBindGroupLayout: GPUBindGroupLayout;
+    skyboxBindGroup: GPUBindGroup;
+
     constructor(stage: Stage) {
         super(stage);
 
         let geometryDeviceTextureSize = [renderer.canvas.width, renderer.canvas.height];
+        const env = stage.environment;
 
-        // TODO-2: initialize layouts, pipelines, textures, etc. needed for Forward+ here
         this.depthTexture = renderer.device.createTexture({
             size: [renderer.canvas.width, renderer.canvas.height],
             format: "depth24plus",
@@ -68,8 +66,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             label: "G-Buffer Albedo Texture",
             size: geometryDeviceTextureSize,
             format: "rgba8unorm",
-            usage: GPUTextureUsage.RENDER_ATTACHMENT |
-                    GPUTextureUsage.TEXTURE_BINDING
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
         });
         this.geometryAlbedoDeviceTextureView = this.geometryAlbedoDeviceTexture.createView();
 
@@ -77,8 +74,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             label: "G-Buffer Normal Texture",
             size: geometryDeviceTextureSize,
             format: "rgba16float",
-            usage: GPUTextureUsage.RENDER_ATTACHMENT |
-                GPUTextureUsage.TEXTURE_BINDING
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
         });
         this.geometryNormalDeviceTextureView = this.geometryNormalDeviceTexture.createView();
 
@@ -86,34 +82,30 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             label: "geometry position Texture",
             size: geometryDeviceTextureSize,
             format: "rgba16float",
-            usage: GPUTextureUsage.RENDER_ATTACHMENT |
-                GPUTextureUsage.TEXTURE_BINDING
-        })
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+        });
         this.geometryPositionDeviceTextureView = this.geometryPositionDeviceTexture.createView();
 
         this.geometrySpecularDeviceTexture = renderer.device.createTexture({
             label: "geometry specular Texture",
             size: geometryDeviceTextureSize,
             format: "rgba8unorm",
-            usage: GPUTextureUsage.RENDER_ATTACHMENT |
-                GPUTextureUsage.TEXTURE_BINDING
-        })
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+        });
         this.geometrySpecularDeviceTextureView = this.geometrySpecularDeviceTexture.createView();
 
         this.shadingOutputDeviceTexture = renderer.device.createTexture({
             label: "shading output Texture",
             size: geometryDeviceTextureSize,
             format: "rgba8unorm",
-            usage: GPUTextureUsage.STORAGE_BINDING |
-                   GPUTextureUsage.TEXTURE_BINDING
-        })
+            usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING
+        });
         this.shadingOutputDeviceTextureView = this.shadingOutputDeviceTexture.createView();
 
         this.tileOffsetsDeviceBuffer = renderer.device.createBuffer({
-            size: shaders.constants.numTotalClustersConfig * 2 * 4, // offset and count per tile
+            size: shaders.constants.numTotalClustersConfig * 2 * 4,
             usage: GPUBufferUsage.STORAGE,
-        })
-
+        });
 
         this.zeroDeviceBuffer = renderer.device.createBuffer({
             size: 4,
@@ -129,9 +121,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             mappedAtCreation: true
         });
         const mappedRange = this.clusterSetDeviceBuffer.getMappedRange();
-        //const floatView = new Float32Array(mappedRange);
         const uintView = new Uint32Array(mappedRange);
-
         uintView[0] = renderer.canvas.width;
         uintView[1] = renderer.canvas.height;
         uintView[2] = shaders.constants.numClustersX;
@@ -143,10 +133,10 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         const maxIndices = shaders.constants.numTotalClustersConfig * averageLightsPerTile;
 
         this.globalLightIndicesDeviceBuffer = renderer.device.createBuffer({
-            size: 4 + maxIndices * 4, // one counter and maxLights indices
+            size: 4 + maxIndices * 4,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
             label: "global light indices buffer"
-        })
+        });
 
         this.geometryBindGroupLayout = renderer.device.createBindGroupLayout({
             label: "geometry bind group layout",
@@ -157,7 +147,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                     buffer: { type: "uniform" }
                 }
             ]
-        })
+        });
 
         this.geometryBindGroup = renderer.device.createBindGroup({
             label: "geometry bind group",
@@ -165,7 +155,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             entries: [
                 {binding: 0, resource: { buffer: this.camera.uniformsBuffer}}
             ]
-        })
+        });
 
         this.geometryPipeline = renderer.device.createRenderPipeline({
             label: "geometry pipeline",
@@ -206,77 +196,27 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 topology: "triangle-list",
                 cullMode: "back"
             }
-        })
+        });
 
         this.shadingBindGroupLayout = renderer.device.createBindGroupLayout({
             label: "shading bind group layout",
             entries: [
-                { // Camera Uniforms
-                    binding: 0,
-                    visibility: GPUShaderStage.COMPUTE,
-                    buffer: { type: "uniform" }
-                },
-                {   // Light Set
-                    binding: 1,
-                    visibility: GPUShaderStage.COMPUTE,
-                    buffer: { type: "read-only-storage" }
-                },
-                {
-                    //Tile offsets
-                    binding: 2,
-                    visibility: GPUShaderStage.COMPUTE,
-                    buffer: { type: "read-only-storage" } 
-                },
-                {
-                    //Global light indices
-                    binding: 3,
-                    visibility: GPUShaderStage.COMPUTE,
-                    buffer: { type: "read-only-storage" } 
-                },
-                {
-                    //Cluster set
-                    binding: 4,
-                    visibility: GPUShaderStage.COMPUTE,
-                    buffer: { type: "uniform" }
-                },
-                {
-                    // gbuffer albedo
-                    binding: 5,
-                    visibility: GPUShaderStage.COMPUTE,
-                    texture: { sampleType: "float" }
-                },
-                {
-                    // gbuffer normal
-                    binding: 6,
-                    visibility: GPUShaderStage.COMPUTE,
-                    texture: { sampleType: "unfilterable-float" }
-                },
-                {
-                    // gbuffer position
-                    binding: 7,
-                    visibility: GPUShaderStage.COMPUTE,
-                    texture: { sampleType: "unfilterable-float" }
-                },
-                {
-                    // gbuffer specular
-                    binding: 8,
-                    visibility: GPUShaderStage.COMPUTE,
-                    texture: { sampleType: "float" }
-                },
-                {
-                    // gbuffer depth
-                    binding: 9,
-                    visibility: GPUShaderStage.COMPUTE,
-                    texture: { sampleType: "depth" }
-                },
-                {
-                    binding: 10,
-                    visibility: GPUShaderStage.COMPUTE,
-                    storageTexture: {
-                        access: "write-only",
-                        format: "rgba8unorm",
-                    }
-                }
+                { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+                { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+                { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+                { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+                { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+                { binding: 5, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
+                { binding: 6, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+                { binding: 7, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "unfilterable-float" } },
+                { binding: 8, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
+                { binding: 9, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "depth" } },
+                { binding: 10, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: "write-only", format: "rgba8unorm" } },
+                // IBL textures
+                { binding: 11, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float", viewDimension: "cube" } },
+                { binding: 12, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float", viewDimension: "cube" } },
+                { binding: 13, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: "float" } },
+                { binding: 14, visibility: GPUShaderStage.COMPUTE, sampler: {} },
             ]
         });
 
@@ -308,42 +248,16 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             }
         });
 
-
         this.cullingBindGroupLayout = renderer.device.createBindGroupLayout({
-        label: "culling bind group layout",
-        entries: [
-                {
-                    //Camera uniforms
-                    binding: 0,
-                    visibility: GPUShaderStage.COMPUTE,
-                    buffer: { type: "uniform" }
-                },
-                {
-                    //Light set
-                    binding: 1,
-                    visibility: GPUShaderStage.COMPUTE,
-                    buffer: { type: "read-only-storage" }
-                },
-                {
-                    //Tile offsets
-                    binding: 2,
-                    visibility: GPUShaderStage.COMPUTE,
-                    buffer: { type: "storage" } 
-                },
-                {
-                    //Global light indices
-                    binding: 3,
-                    visibility: GPUShaderStage.COMPUTE,
-                    buffer: { type: "storage" } 
-                },
-                {
-                    //Cluster set
-                    binding: 4,
-                    visibility: GPUShaderStage.COMPUTE,
-                    buffer: { type: "uniform" }
-                }
+            label: "culling bind group layout",
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+                { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+                { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+                { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+                { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } }
             ]
-        })
+        });
 
         this.cullingBindGroup = renderer.device.createBindGroup({
             label: "culling bind group",
@@ -385,30 +299,13 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 { binding: 7, resource: this.geometryPositionDeviceTextureView },
                 { binding: 8, resource: this.geometrySpecularDeviceTextureView },
                 { binding: 9, resource: this.depthTextureView},
-                { binding: 10, resource: this.shadingOutputDeviceTextureView }
+                { binding: 10, resource: this.shadingOutputDeviceTextureView },
+                { binding: 11, resource: env.irradianceMapView },
+                { binding: 12, resource: env.prefilteredMapView },
+                { binding: 13, resource: env.brdfLutView },
+                { binding: 14, resource: env.envSampler },
             ]
         });
-
-        // this.shadingPipeline = renderer.device.createRenderPipeline({
-        //     label: "shading pipeline",
-        //     layout: renderer.device.createPipelineLayout({
-        //         bindGroupLayouts: [
-        //             this.shadingBindGroupLayout
-        //         ]
-        //     }),
-        //     vertex: {
-        //         module: renderer.device.createShaderModule({ code: shaders.clusteredDeferredFullscreenVertSrc, label: "final vertex(triangle) shader",}),
-        //         entryPoint: "main"
-        //     },
-        //     fragment: {
-        //         module: renderer.device.createShaderModule({
-        //             label: "shading fragment shader",  
-        //             code: shaders.clusteredDeferredFragSrc,
-        //         }),
-        //         entryPoint: "main",
-        //         targets: [ { format: renderer.canvasFormat }]
-        //     }
-        // });
 
         this.shadingComputePipeline = renderer.device.createComputePipeline({
             label: "Shading Compute Pipeline",
@@ -422,7 +319,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 }),
                 entryPoint: "main"
             }
-        })
+        });
 
         this.blitSampler = renderer.device.createSampler({
             magFilter: 'linear',
@@ -432,16 +329,8 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         this.blitBindGroupLayout = renderer.device.createBindGroupLayout({
             label: "Blit Bind Group Layout",
             entries: [
-                {
-                    binding: 0,
-                    visibility: GPUShaderStage.FRAGMENT,
-                    texture: {}
-                },
-                {
-                    binding: 1,
-                    visibility: GPUShaderStage.FRAGMENT,
-                    sampler: {}
-                }
+                { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: {} },
+                { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {} }
             ]
         });
 
@@ -473,14 +362,56 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 targets: [{ format: renderer.canvasFormat }]
             }
         });
+
+        // Skybox
+        this.skyboxBindGroupLayout = renderer.device.createBindGroupLayout({
+            label: "skybox bind group layout",
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+                { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "cube" } },
+                { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} }
+            ]
+        });
+
+        this.skyboxBindGroup = renderer.device.createBindGroup({
+            label: "skybox bind group",
+            layout: this.skyboxBindGroupLayout,
+            entries: [
+                { binding: 0, resource: { buffer: this.camera.uniformsBuffer } },
+                { binding: 1, resource: env.envCubemapView },
+                { binding: 2, resource: env.envSampler }
+            ]
+        });
+
+        this.skyboxPipeline = renderer.device.createRenderPipeline({
+            label: "skybox pipeline",
+            layout: renderer.device.createPipelineLayout({
+                bindGroupLayouts: [ this.skyboxBindGroupLayout ]
+            }),
+            depthStencil: {
+                depthWriteEnabled: false,
+                depthCompare: "less-equal",
+                format: "depth24plus"
+            },
+            vertex: {
+                module: renderer.device.createShaderModule({ code: shaders.skyboxVertSrc }),
+                entryPoint: "main"
+            },
+            fragment: {
+                module: renderer.device.createShaderModule({ code: shaders.skyboxFragSrc }),
+                entryPoint: "main",
+                targets: [ { format: renderer.canvasFormat } ]
+            }
+        });
     }
 
     override draw() {
         const encoder = renderer.device.createCommandEncoder();
         const canvasTextureView = renderer.context.getCurrentTexture().createView();
 
+        // Z-Prepass
         const zPrepass = encoder.beginRenderPass({
-            label: "naive render pass",
+            label: "z prepass",
             colorAttachments: [],
             depthStencilAttachment: {
                 view: this.depthTextureView,
@@ -502,33 +433,14 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         });
         zPrepass.end();
 
+        // Geometry pass
         const geometryRenderPass = encoder.beginRenderPass({
             label: "geometry render pass",
             colorAttachments: [
-                {
-                    view: this.geometryAlbedoDeviceTextureView, 
-                    loadOp: "clear",
-                    clearValue: [0, 0, 0, 0],
-                    storeOp: "store"
-                },
-                {
-                    view: this.geometryNormalDeviceTextureView, 
-                    loadOp: "clear",
-                    clearValue: [0, 0, 0, 0],
-                    storeOp: "store"
-                },
-                {
-                    view: this.geometryPositionDeviceTextureView, 
-                    loadOp: "clear",
-                    clearValue: [0, 0, 0, 0],
-                    storeOp: "store"
-                },
-                {
-                    view: this.geometrySpecularDeviceTextureView,
-                    loadOp: "clear",
-                    clearValue: [0, 0, 0, 0],
-                    storeOp: "store"
-                }
+                { view: this.geometryAlbedoDeviceTextureView, loadOp: "clear", clearValue: [0, 0, 0, 0], storeOp: "store" },
+                { view: this.geometryNormalDeviceTextureView, loadOp: "clear", clearValue: [0, 0, 0, 0], storeOp: "store" },
+                { view: this.geometryPositionDeviceTextureView, loadOp: "clear", clearValue: [0, 0, 0, 0], storeOp: "store" },
+                { view: this.geometrySpecularDeviceTextureView, loadOp: "clear", clearValue: [0, 0, 0, 0], storeOp: "store" }
             ],
             depthStencilAttachment: {
                 view: this.depthTextureView,
@@ -537,7 +449,6 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         });
         geometryRenderPass.setPipeline(this.geometryPipeline);
         geometryRenderPass.setBindGroup(shaders.constants.bindGroup_scene, this.geometryBindGroup);
-
         this.scene.iterate(node => {
             geometryRenderPass.setBindGroup(shaders.constants.bindGroup_model, node.modelBindGroup);
         }, material => {
@@ -549,14 +460,14 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         });
         geometryRenderPass.end();
 
-
-        //reset the global light indices counter to zero
+        // Reset light indices counter
         encoder.copyBufferToBuffer(
             this.zeroDeviceBuffer, 0,
             this.globalLightIndicesDeviceBuffer, 0,
             4
         );
 
+        // Light clustering
         const cullingComputePass = encoder.beginComputePass();
         cullingComputePass.setPipeline(this.cullingPipeline);
         cullingComputePass.setBindGroup(shaders.constants.bindGroup_scene, this.cullingBindGroup);
@@ -567,15 +478,16 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         );
         cullingComputePass.end();
 
+        // Deferred shading compute pass
         const shadingComputePass = encoder.beginComputePass();
         shadingComputePass.setPipeline(this.shadingComputePipeline);
         shadingComputePass.setBindGroup(0, this.shadingBindGroup);
- 
         const workgroupsX = Math.ceil(renderer.canvas.width / 8);
         const workgroupsY = Math.ceil(renderer.canvas.height / 8);
         shadingComputePass.dispatchWorkgroups(workgroupsX, workgroupsY, 1);
         shadingComputePass.end();
 
+        // Blit pass (no depth needed — fullscreen quad)
         const blitPass = encoder.beginRenderPass({
             label: "Blit Pass",
             colorAttachments: [
@@ -591,6 +503,27 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         blitPass.setBindGroup(0, this.blitBindGroup);
         blitPass.draw(3);
         blitPass.end();
+
+        // Skybox pass
+        const skyboxPass = encoder.beginRenderPass({
+            label: "Skybox Pass",
+            colorAttachments: [
+                {
+                    view: canvasTextureView,
+                    loadOp: "load",
+                    storeOp: "store"
+                }
+            ],
+            depthStencilAttachment: {
+                view: this.depthTextureView,
+                depthLoadOp: "load",
+                depthStoreOp: "store"
+            }
+        });
+        skyboxPass.setPipeline(this.skyboxPipeline);
+        skyboxPass.setBindGroup(0, this.skyboxBindGroup);
+        skyboxPass.draw(3);
+        skyboxPass.end();
 
         renderer.device.queue.submit([encoder.finish()]);
     }

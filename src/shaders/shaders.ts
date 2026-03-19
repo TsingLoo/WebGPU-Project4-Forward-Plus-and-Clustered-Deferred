@@ -22,13 +22,19 @@ import clusteringComputeRaw from './clustering.cs.wgsl?raw';
 
 import zPrepassFragRaw from './zPrepass.fs.wgsl?raw';
 
+// IBL shaders
+import generateCubemapRaw from './generate_cubemap.cs.wgsl?raw';
+import irradianceConvolutionRaw from './irradiance_convolution.cs.wgsl?raw';
+import prefilterEnvmapRaw from './prefilter_envmap.cs.wgsl?raw';
+import brdfLutRaw from './brdf_lut.cs.wgsl?raw';
+import equirectangularToCubemapRaw from './equirectangular_to_cubemap.cs.wgsl?raw';
+
+// Skybox shaders
+import skyboxVertRaw from './skybox.vs.wgsl?raw';
+import skyboxFragRaw from './skybox.fs.wgsl?raw';
+
 // CONSTANTS (for use in shaders)
 // =================================
-
-// CHECKITOUT: feel free to add more constants here and to refer to them in your shader code
-
-// Note that these are declared in a somewhat roundabout way because otherwise minification will drop variables
-// that are unused in host side code.
 
 const numClustersXConfig = 16;
 const numClustersYConfig = 16;
@@ -41,7 +47,6 @@ export const constants = {
     numClustersZ: numClusterZConfig,
     numTotalClustersConfig: numTotalClustersConfig,
 
-    
     averageLightsPerCluster: 1024,
     maxLightsPerCluster: 1024,
 
@@ -100,3 +105,14 @@ export const moveLightsComputeSrc: string = processShaderRaw(moveLightsComputeRa
 export const clusteringComputeSrc: string = processShaderRaw(clusteringComputeRaw);
 
 export const zPrepassFragSrc: string = processShaderRaw(zPrepassFragRaw);
+
+// IBL shaders (standalone, not prepended with common)
+export const generateCubemapSrc = generateCubemapRaw;
+export const irradianceConvolutionSrc = irradianceConvolutionRaw;
+export const prefilterEnvmapSrc = prefilterEnvmapRaw;
+export const brdfLutSrc = brdfLutRaw;
+export const equirectangularToCubemapSrc = equirectangularToCubemapRaw;
+
+// Skybox shaders (need common for CameraUniforms)
+export const skyboxVertSrc: string = processShaderRaw(skyboxVertRaw);
+export const skyboxFragSrc: string = processShaderRaw(skyboxFragRaw);

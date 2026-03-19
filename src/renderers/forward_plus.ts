@@ -4,12 +4,9 @@ import { Camera } from '../stage/camera';
 import { Stage } from '../stage/stage';
 
 export class ForwardPlusRenderer extends renderer.Renderer {
-    // TODO-2: add layouts, pipelines, textures, etc. needed for Forward+ here
-    // you may need extra uniforms such as the camera view matrix and the canvas resolution
     depthTexture: GPUTexture;
     depthTextureView: GPUTextureView;
 
-    //the index of the first light in each tile and the number of lights in each tile
     tileOffsetsDeviceBuffer: GPUBuffer;
     globalLightIndicesDeviceBuffer: GPUBuffer;
     zeroDeviceBuffer: GPUBuffer;
@@ -26,9 +23,12 @@ export class ForwardPlusRenderer extends renderer.Renderer {
     shadingBindGroup: GPUBindGroup;
     shadingPipeline: GPURenderPipeline;
 
+    skyboxPipeline: GPURenderPipeline;
+    skyboxBindGroupLayout: GPUBindGroupLayout;
+    skyboxBindGroup: GPUBindGroup;
+
     constructor(stage: Stage) {
         super(stage);
-        // TODO-2: initialize layouts, pipelines, textures, etc. needed for Forward+ here
         this.depthTexture = renderer.device.createTexture({
             size: [renderer.canvas.width, renderer.canvas.height],
             format: "depth24plus",
@@ -37,7 +37,7 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         this.depthTextureView = this.depthTexture.createView();
 
         this.tileOffsetsDeviceBuffer = renderer.device.createBuffer({
-            size: shaders.constants.numTotalClustersConfig * 2 * 4, // offset and count per tile
+            size: shaders.constants.numTotalClustersConfig * 2 * 4,
             usage: GPUBufferUsage.STORAGE,
         })
 
@@ -55,7 +55,6 @@ export class ForwardPlusRenderer extends renderer.Renderer {
             mappedAtCreation: true
         });
         const mappedRange = this.clusterSetDeviceBuffer.getMappedRange();
-        //const floatView = new Float32Array(mappedRange);
         const uintView = new Uint32Array(mappedRange);
 
         uintView[0] = renderer.canvas.width;
@@ -68,10 +67,12 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         const maxIndices = shaders.constants.numTotalClustersConfig * shaders.constants.averageLightsPerCluster;
 
         this.globalLightIndicesDeviceBuffer = renderer.device.createBuffer({
-            size: 4 + maxIndices * 4, // one counter and maxLights indices
+            size: 4 + maxIndices * 4,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
             label: "global light indices buffer"
         })
+
+        const env = stage.environment;
 
         this.shadingBindGroupLayout = renderer.device.createBindGroupLayout({
             label: "shading bind group layout",
@@ -86,23 +87,40 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                     visibility: GPUShaderStage.FRAGMENT,
                     buffer: { type: "read-only-storage" }
                 },
-                {
-                    //Tile offsets
+                {   // Tile offsets
                     binding: 2,
                     visibility: GPUShaderStage.FRAGMENT,
                     buffer: { type: "read-only-storage" } 
                 },
-                {
-                    //Global light indices
+                {   // Global light indices
                     binding: 3,
                     visibility: GPUShaderStage.FRAGMENT,
                     buffer: { type: "read-only-storage" } 
                 },
-                {
-                    //Cluster set
+                {   // Cluster set
                     binding: 4,
                     visibility: GPUShaderStage.FRAGMENT,
                     buffer: { type: "uniform" }
+                },
+                {   // Irradiance cubemap
+                    binding: 5,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: { sampleType: "float", viewDimension: "cube" }
+                },
+                {   // Prefiltered specular cubemap
+                    binding: 6,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: { sampleType: "float", viewDimension: "cube" }
+                },
+                {   // BRDF LUT
+                    binding: 7,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: { sampleType: "float" }
+                },
+                {   // IBL Sampler
+                    binding: 8,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    sampler: {}
                 }
             ]
         });
@@ -141,31 +159,26 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         label: "culling bind group layout",
         entries: [
                 {
-                    //Camera uniforms
                     binding: 0,
                     visibility: GPUShaderStage.COMPUTE,
                     buffer: { type: "uniform" }
                 },
                 {
-                    //Light set
                     binding: 1,
                     visibility: GPUShaderStage.COMPUTE,
                     buffer: { type: "read-only-storage" }
                 },
                 {
-                    //Tile offsets
                     binding: 2,
                     visibility: GPUShaderStage.COMPUTE,
                     buffer: { type: "storage" } 
                 },
                 {
-                    //Global light indices
                     binding: 3,
                     visibility: GPUShaderStage.COMPUTE,
                     buffer: { type: "storage" } 
                 },
                 {
-                    //Cluster set
                     binding: 4,
                     visibility: GPUShaderStage.COMPUTE,
                     buffer: { type: "uniform" }
@@ -206,7 +219,11 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                 { binding: 1, resource: { buffer: this.lights.lightSetStorageBuffer }},
                 { binding: 2, resource: { buffer: this.tileOffsetsDeviceBuffer }},
                 { binding: 3, resource: { buffer: this.globalLightIndicesDeviceBuffer }},
-                { binding: 4, resource: { buffer: this.clusterSetDeviceBuffer }}
+                { binding: 4, resource: { buffer: this.clusterSetDeviceBuffer }},
+                { binding: 5, resource: env.irradianceMapView },
+                { binding: 6, resource: env.prefilteredMapView },
+                { binding: 7, resource: env.brdfLutView },
+                { binding: 8, resource: env.envSampler }
             ]
         });
 
@@ -234,6 +251,47 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                 targets: [ { format: renderer.canvasFormat }]
             }
         });
+
+        // Skybox
+        this.skyboxBindGroupLayout = renderer.device.createBindGroupLayout({
+            label: "skybox bind group layout",
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+                { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "cube" } },
+                { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} }
+            ]
+        });
+
+        this.skyboxBindGroup = renderer.device.createBindGroup({
+            label: "skybox bind group",
+            layout: this.skyboxBindGroupLayout,
+            entries: [
+                { binding: 0, resource: { buffer: this.camera.uniformsBuffer } },
+                { binding: 1, resource: env.envCubemapView },
+                { binding: 2, resource: env.envSampler }
+            ]
+        });
+
+        this.skyboxPipeline = renderer.device.createRenderPipeline({
+            label: "skybox pipeline",
+            layout: renderer.device.createPipelineLayout({
+                bindGroupLayouts: [ this.skyboxBindGroupLayout ]
+            }),
+            depthStencil: {
+                depthWriteEnabled: false,
+                depthCompare: "less-equal",
+                format: "depth24plus"
+            },
+            vertex: {
+                module: renderer.device.createShaderModule({ code: shaders.skyboxVertSrc }),
+                entryPoint: "main"
+            },
+            fragment: {
+                module: renderer.device.createShaderModule({ code: shaders.skyboxFragSrc }),
+                entryPoint: "main",
+                targets: [ { format: renderer.canvasFormat } ]
+            }
+        });
     }
 
     override draw() {
@@ -241,7 +299,7 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         const canvasTextureView = renderer.context.getCurrentTexture().createView();
 
         const zPrepass = encoder.beginRenderPass({
-            label: "naive render pass",
+            label: "z prepass",
             colorAttachments: [],
             depthStencilAttachment: {
                 view: this.depthTextureView,
@@ -308,6 +366,27 @@ export class ForwardPlusRenderer extends renderer.Renderer {
             shadingRenderPass.drawIndexed(primitive.numIndices);
         });
         shadingRenderPass.end();
+
+        // Skybox pass - draw behind all geometry
+        const skyboxPass = encoder.beginRenderPass({
+            label: "Skybox Pass",
+            colorAttachments: [
+                {
+                    view: canvasTextureView,
+                    loadOp: "load",
+                    storeOp: "store"
+                }
+            ],
+            depthStencilAttachment: {
+                view: this.depthTextureView,
+                depthLoadOp: "load",
+                depthStoreOp: "store"
+            }
+        });
+        skyboxPass.setPipeline(this.skyboxPipeline);
+        skyboxPass.setBindGroup(0, this.skyboxBindGroup);
+        skyboxPass.draw(3);
+        skyboxPass.end();
 
         renderer.device.queue.submit([encoder.finish()]);
     }

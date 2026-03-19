@@ -19,6 +19,8 @@
     "@loaders.gl/gltf": "^4.2.2",
     "@loaders.gl/images": "^4.2.3",
     "dat.gui": "^0.7.9",
+    "parse-exr": "^1.0.2",
+    "parse-hdr": "^1.0.0",
     "stats.js": "^0.17.0",
     "wgpu-matrix": "^3.0.2"
   }

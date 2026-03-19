@@ -15,7 +15,6 @@ export const fovYDegrees = 45;
 export var modelBindGroupLayout: GPUBindGroupLayout;
 export var materialBindGroupLayout: GPUBindGroupLayout;
 
-// CHECKITOUT: this function initializes WebGPU and also creates some bind group layouts shared by all the renderers
 export async function initWebGPU() {
     canvas = document.getElementById("mainCanvas") as HTMLCanvasElement;
 
@@ -75,6 +74,21 @@ export async function initWebGPU() {
                 binding: 1,
                 visibility: GPUShaderStage.FRAGMENT,
                 sampler: {}
+            },
+            { // PBR params uniform buffer (roughness, metallic, pad, pad, baseColorFactor)
+                binding: 2,
+                visibility: GPUShaderStage.FRAGMENT,
+                buffer: { type: "uniform" }
+            },
+            { // metallicRoughnessTex
+                binding: 3,
+                visibility: GPUShaderStage.FRAGMENT,
+                texture: {}
+            },
+            { // metallicRoughnessTexSampler
+                binding: 4,
+                visibility: GPUShaderStage.FRAGMENT,
+                sampler: {}
             }
         ]
     });
@@ -126,7 +140,6 @@ export abstract class Renderer {
 
     protected abstract draw(): void;
 
-    // CHECKITOUT: this is the main rendering loop
     private onFrame(time: number) {
         if (this.prevTime == 0) {
             this.prevTime = time;

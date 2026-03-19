@@ -10,31 +10,14 @@
 @group(${bindGroup_scene}) @binding(8) var specularTex: texture_2d<f32>;
 @group(${bindGroup_scene}) @binding(9) var depthTex: texture_depth_2d;
 @group(${bindGroup_scene}) @binding(10) var outputTex: texture_storage_2d<rgba8unorm, write>;
-// TODO-2: implement the Forward+ fragment shader
+@group(${bindGroup_scene}) @binding(11) var irradianceMap: texture_cube<f32>;
+@group(${bindGroup_scene}) @binding(12) var prefilteredMap: texture_cube<f32>;
+@group(${bindGroup_scene}) @binding(13) var brdfLutTex: texture_2d<f32>;
+@group(${bindGroup_scene}) @binding(14) var iblSampler: sampler;
 
-// See naive.fs.wgsl for basic fragment shader setup; this shader should use light clusters instead of looping over all lights
-
-// ------------------------------------
-// Shading process:
-// ------------------------------------
-// Determine which cluster contains the current fragment.
-// Retrieve the number of lights that affect the current fragment from the cluster’s data.
-// Initialize a variable to accumulate the total light contribution for the fragment.
-// For each light in the cluster:
-//     Access the light's properties using its index.
-//     Calculate the contribution of the light based on its position, the fragment’s position, and the surface normal.
-//     Add the calculated contribution to the total light accumulation.
-// Multiply the fragment’s diffuse color by the accumulated light contribution.
-// Return the final color, ensuring that the alpha component is set appropriately (typically to 1).
-
-struct FragmentInput
-{
-    @builtin(position) fragcoord: vec4f,
-}
-
-@compute @workgroup_size(8, 8, 1) // 假设 workgroup_size 为 8x8
+@compute @workgroup_size(8, 8, 1)
 fn main(
-    @builtin(global_invocation_id) global_id: vec3u // 替换 @builtin(position)
+    @builtin(global_invocation_id) global_id: vec3u
 ) {
     let fragcoordi = vec2i(global_id.xy);
     let screen_pos_x = f32(global_id.x);
@@ -51,43 +34,43 @@ fn main(
         return;
     }
 
+    let albedo = diffuseColor.rgb;
     let pos_world = textureLoad(positionTex, fragcoordi, 0).xyz;
     let nor_world = textureLoad(normalTex, fragcoordi, 0).xyz;
+    let specularData = textureLoad(specularTex, fragcoordi, 0);
+    
+    let roughness = max(specularData.r, 0.04);
+    let metallic = specularData.g;
 
+    let N = normalize(nor_world);
+    let V = normalize(camera.camera_pos.xyz - pos_world);
+
+    // ---- Cluster lookup ----
     let screen_width = f32(clusterSet.screen_width);
     let screen_height = f32(clusterSet.screen_height);
 
     let num_clusters_X = clusterSet.num_clusters_X;
     let num_clusters_Y = clusterSet.num_clusters_Y;
     let num_clusters_Z = clusterSet.num_clusters_Z;
-    let num_clusters = num_clusters_X * num_clusters_Y * num_clusters_Z;
 
-    let num_lights = lightSet.numLights;
-
-    let screen_size_cluster_x = f32(screen_width) / f32(num_clusters_X);
-    let screen_size_cluster_y = f32(screen_height) / f32(num_clusters_Y);
+    let screen_size_cluster_x = screen_width / f32(num_clusters_X);
+    let screen_size_cluster_y = screen_height / f32(num_clusters_Y);
 
     let clusterid_x = u32(screen_pos_x / screen_size_cluster_x);
     let clusterid_y_unflipped = u32(screen_pos_y / screen_size_cluster_y);
     let clusterid_y = clamp((num_clusters_Y - 1u) - clusterid_y_unflipped, 0u, num_clusters_Y - 1u);
 
-    let pos_view = (camera.view_mat * vec4f(pos_world,1.0)).xyz;
-
-    //z_view is negative in front of the camera
+    let pos_view = (camera.view_mat * vec4f(pos_world, 1.0)).xyz;
     let z_view = pos_view.z;
 
-    let near = camera.near_plane; 
+    let near = camera.near_plane;
     let far = camera.far_plane;
+    let clamped_Z_positive = clamp(-z_view, near, far);
 
-    let clamped_Z_positive = clamp(- z_view, near, far);
-
-    let logFN = log(far/near);
+    let logFN = log(far / near);
     let SCALE = f32(num_clusters_Z) / logFN;
     let BIAS = SCALE * log(near);
-
-
     let slice = log(clamped_Z_positive) * SCALE - BIAS;
-
     let cluster_z = clamp(u32(floor(slice)), 0u, num_clusters_Z - 1u);
 
     let cluster_index = cluster_z * (num_clusters_X * num_clusters_Y) +
@@ -98,21 +81,40 @@ fn main(
     let offset = lightmeta.offset;
     let count = lightmeta.count;
 
-    let normalized_normal = normalize(nor_world); // Normalize normal once
-
-    var totalLightContrib = vec3f(0, 0, 0);
+    // ---- Direct lighting (PBR Cook-Torrance) ----
+    var Lo = vec3f(0.0);
     for (var i = 0u; i < count; i += 1u) {
-        // Get the actual light index from the global list
         let light_idx = globalLightIndices.indices[offset + i];
-        
-        // Get the light data
         let light = lightSet.lights[light_idx];
-
-        // Calculate contribution (passing world space pos/normal and view matrix)
-        totalLightContrib += calculateLightContrib(light, pos_world, normalized_normal);
+        Lo += calculateLightContribPBR(light, pos_world, N, V, albedo, metallic, roughness);
     }
 
-    let ambient = vec3f(${ambientR}, ${ambientG}, ${ambientB});
-    let finalColor = diffuseColor.rgb * (totalLightContrib + ambient);
-    textureStore(outputTex, fragcoordi, vec4f(finalColor, 1.0));
+    // ---- IBL Ambient (split-sum approximation) ----
+    let F0 = mix(vec3f(0.04), albedo, metallic);
+    let NdotV = max(dot(N, V), 0.0);
+    let F = fresnelSchlickRoughness(NdotV, F0, roughness);
+
+    let kS = F;
+    let kD = (vec3f(1.0) - kS) * (1.0 - metallic);
+
+    // Diffuse IBL
+    let irradiance = textureSampleLevel(irradianceMap, iblSampler, N, 0.0).rgb;
+    let diffuseIBL = irradiance * albedo;
+
+    // Specular IBL
+    let R = reflect(-V, N);
+    let maxLod = 4.0;
+    let prefilteredColor = textureSampleLevel(prefilteredMap, iblSampler, R, roughness * maxLod).rgb;
+    let brdfVal = textureSampleLevel(brdfLutTex, iblSampler, vec2f(NdotV, roughness), 0.0).rg;
+    let specularIBL = prefilteredColor * (F * brdfVal.x + brdfVal.y);
+
+    let ambient = kD * diffuseIBL + specularIBL;
+    let finalColor = ambient + Lo;
+
+    // Tone mapping (Reinhard)
+    let mapped = finalColor / (finalColor + vec3f(1.0));
+    // Gamma correction
+    let corrected = pow(mapped, vec3f(1.0/2.2));
+
+    textureStore(outputTex, fragcoordi, vec4f(corrected, 1.0));
 }
