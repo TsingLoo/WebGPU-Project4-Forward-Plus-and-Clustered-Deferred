@@ -454,6 +454,23 @@ sunFolder.add(stage, 'sunEnabled').name('Enabled').onChange(() => {
 sunFolder.add(stage, 'sunIntensity', 0.0, 20.0).step(0.1).name('Intensity').onChange(() => {
     stage.updateSunLight();
 });
+const volFolder = gui.addFolder('Volumetric Lighting');
+volFolder.add(stage, 'sunVolumetricIntensity', 0.0, 0.1).step(0.001).name('Intensity').onChange(() => {
+    stage.updateSunLight();
+});
+volFolder.add(stage, 'sunVolumetricHeightFalloff', 0.0, 1.0).step(0.01).name('Height Falloff').onChange(() => {
+    stage.updateSunLight();
+});
+volFolder.add(stage, 'sunVolumetricHeightScale', 0.0, 10.0).step(0.1).name('Height Scale').onChange(() => {
+    stage.updateSunLight();
+});
+volFolder.add(stage, 'sunVolumetricMaxDist', 10.0, 300.0).step(1.0).name('Max Dist').onChange(() => {
+    stage.updateSunLight();
+});
+volFolder.add(stage, 'sunVolumetricSteps', 8, 256).step(1).name('Steps (Quality)').onChange(() => {
+    stage.updateSunLight();
+});
+volFolder.open();
 const sunDirProxy = { x: stage.sunDirection[0], y: stage.sunDirection[1], z: stage.sunDirection[2] };
 sunFolder.add(sunDirProxy, 'x', -1, 1).step(0.01).name('Dir X').onChange(() => {
     stage.sunDirection = [sunDirProxy.x, sunDirProxy.y, sunDirProxy.z];

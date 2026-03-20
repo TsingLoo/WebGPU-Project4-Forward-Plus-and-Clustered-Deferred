@@ -22,6 +22,11 @@ export class Stage {
     sunDirection: [number, number, number] = [-0.17, 0.27, 0.05]; // direction TO light
     sunColor: [number, number, number] = [1.0, 0.95, 0.85];   // warm white
     sunIntensity: number = 10.0;
+    sunVolumetricIntensity: number = 0.005;
+    sunVolumetricHeightFalloff: number = 0.15;
+    sunVolumetricHeightScale: number = 4.0;
+    sunVolumetricMaxDist: number = 100.0;
+    sunVolumetricSteps: number = 32;
     sunEnabled: boolean = true;
 
     constructor(scene: Scene, lights: Lights, camera: Camera, stats: Stats, environment: Environment) {
@@ -37,10 +42,10 @@ export class Stage {
         // Sync sun direction into VSM
         this.vsm.sunDirection = this.sunDirection;
 
-        // SunLight struct: direction(vec4f) + color(vec4f) + light_vp(mat4x4f) + shadow_params(vec4f) = 112 bytes
+        // SunLight struct: direction(16) + color(16) + light_vp(64) + shadow_params(16) + volumetric_params(16) = 128 bytes
         this.sunLightBuffer = device.createBuffer({
             label: "Sun Light Uniform",
-            size: 112,
+            size: 128,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });
 
@@ -54,8 +59,8 @@ export class Stage {
         const d = this.sunDirection;
         const len = Math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
 
-        // Write to GPU buffer: direction(16) + color(16) + light_vp(64) + shadow_params(16) = 112 bytes
-        const data = new Float32Array(28); // 112 / 4
+        // Write to GPU buffer: direction(16) + color(16) + light_vp(64) + shadow_params(16) + volumetric_params(16) = 128 bytes
+        const data = new Float32Array(32); // 128 / 4
         // direction.xyz, w=intensity
         data[0] = d[0] / len; data[1] = d[1] / len; data[2] = d[2] / len; data[3] = this.sunIntensity;
         // color.rgb, a=enabled
@@ -63,11 +68,16 @@ export class Stage {
         data[7] = this.sunEnabled ? 1.0 : 0.0;
         // light_vp matrix (16 floats) — placeholder identity, VSM uses its own clipmap VPs
         data[8] = 1; data[13] = 1; data[18] = 1; data[23] = 1;
-        // shadow_params: x = texel size, y = bias
+        // shadow_params: x = texel size, y = bias, z = steps, w = 0
         data[24] = 1.0 / this.vsm.physAtlasSize;
         data[25] = 0.05; // normal bias
-        data[26] = 0;
+        data[26] = this.sunVolumetricSteps;
         data[27] = 0;
+        // volumetric_params: x = intensity, y = heightFalloff, z = heightScale, w = maxDist
+        data[28] = this.sunVolumetricIntensity;
+        data[29] = this.sunVolumetricHeightFalloff;
+        data[30] = this.sunVolumetricHeightScale;
+        data[31] = this.sunVolumetricMaxDist;
 
         device.queue.writeBuffer(this.sunLightBuffer, 0, data.buffer);
     }

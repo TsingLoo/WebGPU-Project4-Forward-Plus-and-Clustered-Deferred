@@ -29,6 +29,17 @@ export class ForwardPlusRenderer extends renderer.Renderer {
     skyboxBindGroupLayout: GPUBindGroupLayout;
     skyboxBindGroup: GPUBindGroup;
 
+    // Volumetric Lighting
+    volumetricTexture: GPUTexture;
+    volumetricTextureView: GPUTextureView;
+    volumetricPipeline: GPURenderPipeline;
+    volumetricBindGroupLayout: GPUBindGroupLayout;
+    volumetricBindGroup!: GPUBindGroup;
+    
+    volumetricCompositePipeline: GPURenderPipeline;
+    volumetricCompositeBindGroupLayout: GPUBindGroupLayout;
+    volumetricCompositeBindGroup!: GPUBindGroup;
+
     // G-buffer for DDGI probe tracing
     gBufferNormalTexture: GPUTexture;
     gBufferNormalTextureView: GPUTextureView;
@@ -56,6 +67,16 @@ export class ForwardPlusRenderer extends renderer.Renderer {
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
         });
         this.depthTextureView = this.depthTexture.createView();
+
+        const volWidth = Math.max(1, Math.floor(renderer.canvas.width / 2));
+        const volHeight = Math.max(1, Math.floor(renderer.canvas.height / 2));
+        this.volumetricTexture = renderer.device.createTexture({
+            label: "volumetric downsampled texture",
+            size: [volWidth, volHeight],
+            format: "rgba16float",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+        });
+        this.volumetricTextureView = this.volumetricTexture.createView();
 
         // G-buffer textures for DDGI probe tracing
         const gBufSize = [renderer.canvas.width, renderer.canvas.height];
@@ -430,6 +451,92 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                 targets: [ { format: renderer.canvasFormat } ]
             }
         });
+
+        // Volumetric Lighting
+        this.volumetricBindGroupLayout = renderer.device.createBindGroupLayout({
+            label: "volumetric lighting bind group layout",
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+                { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "depth" } },
+                { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+                { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "depth" } },
+                { binding: 4, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "read-only-storage" } },
+                { binding: 5, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+            ]
+        });
+
+        this.volumetricPipeline = renderer.device.createRenderPipeline({
+            label: "volumetric lighting pipeline",
+            layout: renderer.device.createPipelineLayout({
+                bindGroupLayouts: [this.volumetricBindGroupLayout]
+            }),
+            vertex: {
+                module: renderer.device.createShaderModule({ code: shaders.volumetricLightingVertSrc }),
+                entryPoint: "main"
+            },
+            fragment: {
+                module: renderer.device.createShaderModule({ code: shaders.volumetricLightingFragSrc }),
+                entryPoint: "main",
+                targets: [ { 
+                    format: "rgba16float" // Rendering to half-res HDR buffer
+                } ]
+            }
+        });
+
+        // Volumetric Bilateral Composite
+        this.volumetricCompositeBindGroupLayout = renderer.device.createBindGroupLayout({
+            label: "volumetric composite bind group layout",
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
+                { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "depth" } },
+                { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+            ]
+        });
+
+        this.volumetricCompositePipeline = renderer.device.createRenderPipeline({
+            label: "volumetric composite pipeline",
+            layout: renderer.device.createPipelineLayout({
+                bindGroupLayouts: [this.volumetricCompositeBindGroupLayout]
+            }),
+            vertex: {
+                module: renderer.device.createShaderModule({ code: shaders.volumetricLightingVertSrc }),
+                entryPoint: "main"
+            },
+            fragment: {
+                module: renderer.device.createShaderModule({ code: shaders.volumetricCompositeFragSrc }),
+                entryPoint: "main",
+                targets: [ { 
+                    format: renderer.canvasFormat,
+                    blend: {
+                        color: { operation: 'add', srcFactor: 'one', dstFactor: 'one' },
+                        alpha: { operation: 'add', srcFactor: 'zero', dstFactor: 'one' }
+                    }
+                } ]
+            }
+        });
+
+        this.volumetricBindGroup = renderer.device.createBindGroup({
+            label: "volumetric lighting bind group",
+            layout: this.volumetricBindGroupLayout,
+            entries: [
+                { binding: 0, resource: { buffer: this.camera.uniformsBuffer } },
+                { binding: 1, resource: this.depthTextureView },
+                { binding: 2, resource: { buffer: this.stage.sunLightBuffer } },
+                { binding: 3, resource: this.vsm.physicalAtlasView },
+                { binding: 4, resource: { buffer: this.vsm.pageTableBuffer } },
+                { binding: 5, resource: { buffer: this.vsm.vsmUniformBuffer } },
+            ]
+        });
+
+        this.volumetricCompositeBindGroup = renderer.device.createBindGroup({
+            label: "volumetric composite bind group",
+            layout: this.volumetricCompositeBindGroupLayout,
+            entries: [
+                { binding: 0, resource: this.volumetricTextureView },
+                { binding: 1, resource: this.depthTextureView },
+                { binding: 2, resource: { buffer: this.camera.uniformsBuffer } },
+            ]
+        });
     }
 
     private createShadingBindGroup() {
@@ -611,6 +718,39 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         skyboxPass.setBindGroup(0, this.skyboxBindGroup);
         skyboxPass.draw(3);
         skyboxPass.end();
+
+        // Volumetric Lighting Generation Pass (Half-Res)
+        const volumetricPass = encoder.beginRenderPass({
+            label: "Volumetric Lighting Generator Pass",
+            colorAttachments: [
+                {
+                    view: this.volumetricTextureView,
+                    loadOp: "clear",
+                    clearValue: { r: 0, g: 0, b: 0, a: 0 },
+                    storeOp: "store"
+                }
+            ]
+        });
+        volumetricPass.setPipeline(this.volumetricPipeline);
+        volumetricPass.setBindGroup(0, this.volumetricBindGroup);
+        volumetricPass.draw(3);
+        volumetricPass.end();
+
+        // Volumetric Composite Pass (Full-Res Upsampling)
+        const volumetricCompositePass = encoder.beginRenderPass({
+            label: "Volumetric Composite Pass",
+            colorAttachments: [
+                {
+                    view: canvasTextureView,
+                    loadOp: "load",
+                    storeOp: "store"
+                }
+            ]
+        });
+        volumetricCompositePass.setPipeline(this.volumetricCompositePipeline);
+        volumetricCompositePass.setBindGroup(0, this.volumetricCompositeBindGroup);
+        volumetricCompositePass.draw(3);
+        volumetricCompositePass.end();
 
         renderer.device.queue.submit([encoder.finish()]);
     }

@@ -142,6 +142,7 @@ struct SunLight {
     color: vec4f,           // rgb = color, a = enabled (0 or 1)
     light_vp: mat4x4f,      // light-space view-projection matrix (unused now, kept for layout compat)
     shadow_params: vec4f,    // x = 1/shadow_map_size, y = bias, z = 0, w = 0
+    volumetric_params: vec4f, // x = intensity, y = heightFalloff, z = heightScale, w = maxDist
 }
 
 fn calculateSunLightPBR(
