@@ -720,37 +720,39 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         skyboxPass.end();
 
         // Volumetric Lighting Generation Pass (Half-Res)
-        const volumetricPass = encoder.beginRenderPass({
-            label: "Volumetric Lighting Generator Pass",
-            colorAttachments: [
-                {
-                    view: this.volumetricTextureView,
-                    loadOp: "clear",
-                    clearValue: { r: 0, g: 0, b: 0, a: 0 },
-                    storeOp: "store"
-                }
-            ]
-        });
-        volumetricPass.setPipeline(this.volumetricPipeline);
-        volumetricPass.setBindGroup(0, this.volumetricBindGroup);
-        volumetricPass.draw(3);
-        volumetricPass.end();
+        if (this.stage.sunVolumetricEnabled) {
+            const volumetricPass = encoder.beginRenderPass({
+                label: "Volumetric Lighting Generator Pass",
+                colorAttachments: [
+                    {
+                        view: this.volumetricTextureView,
+                        loadOp: "clear",
+                        clearValue: { r: 0, g: 0, b: 0, a: 0 },
+                        storeOp: "store"
+                    }
+                ]
+            });
+            volumetricPass.setPipeline(this.volumetricPipeline);
+            volumetricPass.setBindGroup(0, this.volumetricBindGroup);
+            volumetricPass.draw(3);
+            volumetricPass.end();
 
-        // Volumetric Composite Pass (Full-Res Upsampling)
-        const volumetricCompositePass = encoder.beginRenderPass({
-            label: "Volumetric Composite Pass",
-            colorAttachments: [
-                {
-                    view: canvasTextureView,
-                    loadOp: "load",
-                    storeOp: "store"
-                }
-            ]
-        });
-        volumetricCompositePass.setPipeline(this.volumetricCompositePipeline);
-        volumetricCompositePass.setBindGroup(0, this.volumetricCompositeBindGroup);
-        volumetricCompositePass.draw(3);
-        volumetricCompositePass.end();
+            // Volumetric Composite Pass (Full-Res Upsampling)
+            const volumetricCompositePass = encoder.beginRenderPass({
+                label: "Volumetric Composite Pass",
+                colorAttachments: [
+                    {
+                        view: canvasTextureView,
+                        loadOp: "load",
+                        storeOp: "store"
+                    }
+                ]
+            });
+            volumetricCompositePass.setPipeline(this.volumetricCompositePipeline);
+            volumetricCompositePass.setBindGroup(0, this.volumetricCompositeBindGroup);
+            volumetricCompositePass.draw(3);
+            volumetricCompositePass.end();
+        }
 
         renderer.device.queue.submit([encoder.finish()]);
     }

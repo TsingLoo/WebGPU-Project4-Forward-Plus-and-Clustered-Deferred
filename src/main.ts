@@ -455,6 +455,7 @@ sunFolder.add(stage, 'sunIntensity', 0.0, 20.0).step(0.1).name('Intensity').onCh
     stage.updateSunLight();
 });
 const volFolder = gui.addFolder('Volumetric Lighting');
+volFolder.add(stage, 'sunVolumetricEnabled').name('Enabled');
 volFolder.add(stage, 'sunVolumetricIntensity', 0.0, 0.1).step(0.001).name('Intensity').onChange(() => {
     stage.updateSunLight();
 });

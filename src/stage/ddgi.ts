@@ -38,7 +38,7 @@ export class DDGI {
     viewBias = 0.1;
     probeTraceAmbient = 0.3;
 
-    enabled = false;
+    enabled = true;
     debugMode = 0; // 0=off, 1=irradiance, 2=visibility
 
     // GPU resources

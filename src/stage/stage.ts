@@ -22,11 +22,12 @@ export class Stage {
     sunDirection: [number, number, number] = [-0.17, 0.27, 0.05]; // direction TO light
     sunColor: [number, number, number] = [1.0, 0.95, 0.85];   // warm white
     sunIntensity: number = 10.0;
-    sunVolumetricIntensity: number = 0.005;
-    sunVolumetricHeightFalloff: number = 0.15;
-    sunVolumetricHeightScale: number = 4.0;
-    sunVolumetricMaxDist: number = 100.0;
-    sunVolumetricSteps: number = 32;
+    sunVolumetricEnabled: boolean = true;
+    sunVolumetricIntensity: number = 0.001;
+    sunVolumetricHeightFalloff: number = 0.66;
+    sunVolumetricHeightScale: number = 2.0;
+    sunVolumetricMaxDist: number = 82.0;
+    sunVolumetricSteps: number = 16;
     sunEnabled: boolean = true;
 
     constructor(scene: Scene, lights: Lights, camera: Camera, stats: Stats, environment: Environment) {
