@@ -61,7 +61,7 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         const gBufSize = [renderer.canvas.width, renderer.canvas.height];
         this.gBufferAlbedoTexture = renderer.device.createTexture({
             label: "Forward+ G-Buffer Albedo (DDGI)",
-            size: gBufSize, format: 'rgba8unorm',
+            size: gBufSize, format: 'rgba16float',
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
         });
         this.gBufferAlbedoTextureView = this.gBufferAlbedoTexture.createView();
@@ -158,7 +158,7 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                 module: renderer.device.createShaderModule({ code: shaders.geometryFragSrc }),
                 entryPoint: 'main',
                 targets: [
-                    { format: 'rgba8unorm' },   // albedo
+                    { format: 'rgba16float' },   // albedo
                     { format: 'rgba16float' },  // normal
                     { format: 'rgba16float' },  // position
                     { format: 'rgba8unorm' },   // specular

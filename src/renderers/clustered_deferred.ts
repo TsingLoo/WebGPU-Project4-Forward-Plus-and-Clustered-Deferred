@@ -73,7 +73,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         this.geometryAlbedoDeviceTexture = renderer.device.createTexture({
             label: "G-Buffer Albedo Texture",
             size: geometryDeviceTextureSize,
-            format: "rgba8unorm",
+            format: "rgba16float",
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
         });
         this.geometryAlbedoDeviceTextureView = this.geometryAlbedoDeviceTexture.createView();
@@ -194,7 +194,7 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 }),
                 entryPoint: "main",
                 targets: [
-                    { format: "rgba8unorm" }, 
+                    { format: "rgba16float" }, 
                     { format: "rgba16float" },
                     { format: "rgba16float" },
                     { format: "rgba8unorm" },
@@ -234,6 +234,8 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 { binding: 20, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'depth' } },   // VSM physical atlas
                 { binding: 21, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } }, // VSM page table
                 { binding: 22, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },         // VSM uniforms
+                { binding: 23, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },    // NRC inference output
+                { binding: 24, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },         // NRC uniforms
             ]
         });
 
@@ -330,6 +332,8 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 { binding: 20, resource: this.stage.vsm.physicalAtlasView },
                 { binding: 21, resource: { buffer: this.stage.vsm.pageTableBuffer } },
                 { binding: 22, resource: { buffer: this.stage.vsm.vsmUniformBuffer } },
+                { binding: 23, resource: this.stage.nrc.getInferenceView() },
+                { binding: 24, resource: { buffer: this.stage.nrc.nrcUniformBuffer } },
             ]
         });
 
@@ -517,6 +521,14 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             position: this.geometryPositionDeviceTextureView,
         }, this.stage.sunLightBuffer, this.stage.vsm.physicalAtlasView, this.stage.vsm.vsmUniformBuffer);
 
+        // NRC update
+        this.stage.nrc.update(encoder, {
+            depth: this.depthTextureView,
+            normal: this.geometryNormalDeviceTextureView,
+            albedo: this.geometryAlbedoDeviceTextureView,
+            position: this.geometryPositionDeviceTextureView,
+        }, this.stage.sunLightBuffer, this.stage.vsm.physicalAtlasView, this.stage.vsm.vsmUniformBuffer);
+
         // Recreate shading bind group to pick up current DDGI atlas (ping-pong)
         this.shadingBindGroup = renderer.device.createBindGroup({
             label: "shading bind group",
@@ -545,6 +557,8 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 { binding: 20, resource: this.stage.vsm.physicalAtlasView },
                 { binding: 21, resource: { buffer: this.stage.vsm.pageTableBuffer } },
                 { binding: 22, resource: { buffer: this.stage.vsm.vsmUniformBuffer } },
+                { binding: 23, resource: this.stage.nrc.getInferenceView() },
+                { binding: 24, resource: { buffer: this.stage.nrc.nrcUniformBuffer } },
             ]
         });
 

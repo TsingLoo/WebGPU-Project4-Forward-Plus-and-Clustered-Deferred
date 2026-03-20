@@ -226,7 +226,6 @@ fn vsmTileInfo(vsm: VSMUniforms, level: u32) -> vec3u {
 // Uses textureLoad with bilinear PCF for smooth shadow edges
 fn calculateShadowVSM(
     physAtlas: texture_depth_2d,
-    shadowSampler: sampler_comparison, // kept for API compat, unused
     vsm: VSMUniforms,
     sun: SunLight,
     posWorld: vec3f,

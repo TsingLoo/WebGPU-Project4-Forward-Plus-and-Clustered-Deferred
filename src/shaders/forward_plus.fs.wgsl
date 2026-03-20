@@ -142,7 +142,7 @@ fn main(in: FragmentInput) -> @location(0) vec4f
     }
 
     // Sun/directional light with VSM shadow
-    let shadow = calculateShadowVSM(vsmPhysAtlas, vsmShadowSampler, vsmUniforms, sunLight, in.pos_world, N);
+    let shadow = calculateShadowVSM(vsmPhysAtlas, vsmUniforms, sunLight, in.pos_world, N);
     Lo += calculateSunLightPBR(sunLight, in.pos_world, N, V, albedo, metallic, roughness, shadow);
 
     // ---- IBL Ambient (split-sum approximation) ----

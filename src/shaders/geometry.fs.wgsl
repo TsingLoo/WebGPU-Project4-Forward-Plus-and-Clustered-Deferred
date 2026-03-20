@@ -44,7 +44,9 @@ fn main(in: FragmentInput) ->  GBufferOutput
     var ao = 1.0;
     if (pbrParams.has_mr_texture > 0.5) {
         let mrSample = textureSample(metallicRoughnessTex, metallicRoughnessTexSampler, in.uv);
-        ao = mrSample.r;              // ambient occlusion from R channel
+        // glTF spec provides metallicRoughness texture with G=roughness, B=metallic.
+        // Unless we specifically know R is occlusion (ORM packed), reading R can yield 0.0 
+        // which completely disables ambient lighting (pitch black shadows).
         roughness = roughness * mrSample.g;
         metallic = metallic * mrSample.b;
     }

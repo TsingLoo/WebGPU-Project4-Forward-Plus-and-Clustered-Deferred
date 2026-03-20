@@ -19,7 +19,12 @@
 @group(${bindGroup_scene}) @binding(17) var<uniform> ddgiParams: DDGIUniforms;
 @group(${bindGroup_scene}) @binding(18) var ddgiSampler: sampler;
 @group(${bindGroup_scene}) @binding(19) var<uniform> sunLight: SunLight;
-@group(${bindGroup_scene}) @binding(20) var shadowMap: texture_depth_2d;
+@group(${bindGroup_scene}) @binding(20) var vsmPhysAtlas: texture_depth_2d;
+@group(${bindGroup_scene}) @binding(21) var<storage, read> vsmPageTable: array<u32>;
+@group(${bindGroup_scene}) @binding(22) var<uniform> vsmUniforms: VSMUniforms;
+// NRC bindings
+@group(${bindGroup_scene}) @binding(23) var nrcInferenceTex: texture_2d<f32>;
+@group(${bindGroup_scene}) @binding(24) var<uniform> nrcParams: NRCUniforms;
 
 @compute @workgroup_size(8, 8, 1)
 fn main(
@@ -96,8 +101,8 @@ fn main(
         Lo += calculateLightContribPBR(light, pos_world, N, V, albedo, metallic, roughness);
     }
 
-    // Sun/directional light with shadow (simple shadow for compute shader, no comparison sampler)
-    let shadow = calculateShadowSimple(shadowMap, sunLight, pos_world, N);
+    // Sun/directional light with VSM shadow
+    let shadow = calculateShadowVSM(vsmPhysAtlas, vsmUniforms, sunLight, pos_world, N);
     Lo += calculateSunLightPBR(sunLight, pos_world, N, V, albedo, metallic, roughness, shadow);
 
     // ---- IBL Ambient (split-sum approximation) ----
@@ -177,10 +182,20 @@ fn main(
         }
         if (ddgi_totalW > 0.0) { ddgi_totalIrr /= ddgi_totalW; }
 
-        // DDGI bounce at full strength + small IBL fill for areas probes don't reach
         let ddgiBounce = ddgi_totalIrr * albedo;
         let iblFill = iblIrradiance * albedo * 0.3;
         diffuseAmbient = ddgiBounce + iblFill;
+    } else if (nrcParams.scene_min.w > 0.5) {
+        // NRC mode: sample the neural radiance cache inference texture
+        // Map global_id back to screen UV
+        let screenUV = vec2f(f32(global_id.x) + 0.5, f32(global_id.y) + 0.5) / vec2f(nrcParams.screen_dims.x, nrcParams.screen_dims.y);
+        let nrcTexSize = textureDimensions(nrcInferenceTex);
+        let nrcCoord = vec2i(i32(screenUV.x * f32(nrcTexSize.x)), i32(screenUV.y * f32(nrcTexSize.y)));
+        let nrcIrradiance = textureLoad(nrcInferenceTex, nrcCoord, 0).rgb;
+        // NRC provides cached irradiance; apply albedo modulation
+        let nrcBounce = nrcIrradiance * albedo;
+        let iblFloor2 = iblIrradiance * albedo * 0.15;
+        diffuseAmbient = max(nrcBounce, iblFloor2);
     } else {
         // No DDGI: use IBL irradiance with moderate scaling
         diffuseAmbient = iblIrradiance * albedo * 0.7;
