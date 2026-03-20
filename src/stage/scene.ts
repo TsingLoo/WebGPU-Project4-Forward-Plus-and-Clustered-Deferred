@@ -151,6 +151,9 @@ export class Primitive {
     numIndices = -1;
 
     material: Material;
+    
+    cpuPositions?: Float32Array;
+    cpuIndices?: Uint32Array;
 
     constructor(gltfPrim: GLTFMeshPrimitive, gltfWithBuffers: GLTFWithBuffers, material: Material) {
         this.material = material;
@@ -230,6 +233,10 @@ export class Primitive {
         device.queue.writeBuffer(this.vertexBuffer, 0, vertsArray);
 
         this.numIndices = indicesArray.length;
+        
+        // Save for CPU voxelization
+        this.cpuPositions = positionsArray;
+        this.cpuIndices = indicesArray;
     }
 }
 
@@ -398,6 +405,13 @@ function createSampler(gltfSampler: GLTFSampler): GPUSampler {
 
 export class Scene {
     private root: Node = new Node();
+    
+    // Coarse Scene Voxel Grid for Ray Tracing
+    public voxelGrid!: GPUTexture;
+    public voxelGridView!: GPUTextureView;
+    public readonly voxelGridSize = 128; // 128x128x128
+    public readonly voxelBoundsMin = [-15, 0, -10];
+    public readonly voxelBoundsMax = [15, 15, 10];
 
     constructor() {
         this.root.setName("root");
@@ -532,6 +546,125 @@ export class Scene {
         }
 
         sceneRoot.propagateTransformations();
+        
+        // Phase 2: Build World-Space Voxel Grid on CPU for Coarse Scene Tracing!
+        this.buildVoxelGrid();
+    }
+    
+    private buildVoxelGrid() {
+        const size = this.voxelGridSize;
+        const totalVoxels = size * size * size;
+        const voxelData = new Uint8Array(totalVoxels * 4); // RGBA8Unorm
+        voxelData.fill(0);
+        
+        const minX = this.voxelBoundsMin[0], minY = this.voxelBoundsMin[1], minZ = this.voxelBoundsMin[2];
+        const maxX = this.voxelBoundsMax[0], maxY = this.voxelBoundsMax[1], maxZ = this.voxelBoundsMax[2];
+        
+        console.log(`Building Voxel Grid (${size}^3) on CPU...`);
+        let nodes = [this.root];
+        while (nodes.length > 0) {
+            let node = nodes.pop()!;
+            if (node.mesh) {
+                for (let prim of node.mesh.primitives) {
+                    if (!prim.cpuPositions || !prim.cpuIndices) continue;
+                    
+                    const pos = prim.cpuPositions;
+                    const ind = prim.cpuIndices;
+                    const mat = node.transform;
+                    
+                    for (let i = 0; i < prim.numIndices; i += 3) {
+                        const i0 = ind[i] * 3, i1 = ind[i+1] * 3, i2 = ind[i+2] * 3;
+                        
+                        const v0x = pos[i0]*mat[0] + pos[i0+1]*mat[4] + pos[i0+2]*mat[8] + mat[12];
+                        const v0y = pos[i0]*mat[1] + pos[i0+1]*mat[5] + pos[i0+2]*mat[9] + mat[13];
+                        const v0z = pos[i0]*mat[2] + pos[i0+1]*mat[6] + pos[i0+2]*mat[10] + mat[14];
+                        
+                        const v1x = pos[i1]*mat[0] + pos[i1+1]*mat[4] + pos[i1+2]*mat[8] + mat[12];
+                        const v1y = pos[i1]*mat[1] + pos[i1+1]*mat[5] + pos[i1+2]*mat[9] + mat[13];
+                        const v1z = pos[i1]*mat[2] + pos[i1+1]*mat[6] + pos[i1+2]*mat[10] + mat[14];
+                        
+                        const v2x = pos[i2]*mat[0] + pos[i2+1]*mat[4] + pos[i2+2]*mat[8] + mat[12];
+                        const v2y = pos[i2]*mat[1] + pos[i2+1]*mat[5] + pos[i2+2]*mat[9] + mat[13];
+                        const v2z = pos[i2]*mat[2] + pos[i2+1]*mat[6] + pos[i2+2]*mat[10] + mat[14];
+                        
+                        // Compute geometric normal
+                        let nx = (v1y - v0y)*(v2z - v0z) - (v1z - v0z)*(v2y - v0y);
+                        let ny = (v1z - v0z)*(v2x - v0x) - (v1x - v0x)*(v2z - v0z);
+                        let nz = (v1x - v0x)*(v2y - v0y) - (v1y - v0y)*(v2x - v0x);
+                        const nLen = Math.sqrt(nx*nx + ny*ny + nz*nz);
+                        if (nLen > 0) { nx /= nLen; ny /= nLen; nz /= nLen; }
+                        else { nx = 0; ny = 1; nz = 0; }
+                        
+                        const r = Math.floor((nx * 0.5 + 0.5) * 255);
+                        const g = Math.floor((ny * 0.5 + 0.5) * 255);
+                        const b = Math.floor((nz * 0.5 + 0.5) * 255);
+                        const a = 255;
+                        
+                        const dx = (maxX - minX) / size;
+                        const dy = (maxY - minY) / size;
+                        const dz = (maxZ - minZ) / size;
+                        const voxelDiag = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                        
+                        const len1 = Math.sqrt((v1x-v0x)**2 + (v1y-v0y)**2 + (v1z-v0z)**2);
+                        const len2 = Math.sqrt((v2x-v0x)**2 + (v2y-v0y)**2 + (v2z-v0z)**2);
+                        const len3 = Math.sqrt((v2x-v1x)**2 + (v2y-v1y)**2 + (v2z-v1z)**2);
+                        const maxEdge = Math.max(len1, len2, len3);
+                        
+                        const steps = Math.max(1, Math.ceil(maxEdge / (voxelDiag * 0.5)));
+                        
+                        for (let s1 = 0; s1 <= steps; s1++) {
+                            const u = s1 / steps;
+                            for (let s2 = 0; s2 <= steps - s1; s2++) {
+                                const v = s2 / steps;
+                                const w = Math.max(0, 1.0 - u - v);
+                                
+                                const px = v0x*u + v1x*v + v2x*w;
+                                const py = v0y*u + v1y*v + v2y*w;
+                                const pz = v0z*u + v1z*v + v2z*w;
+                                
+                                const vx = Math.floor((px - minX) / dx);
+                                const vy = Math.floor((py - minY) / dy);
+                                const vz = Math.floor((pz - minZ) / dz);
+                                
+                                if (vx >= 0 && vx < size && vy >= 0 && vy < size && vz >= 0 && vz < size) {
+                                    const idx = (vz * size * size + vy * size + vx) * 4;
+                                    voxelData[idx] = r;
+                                    voxelData[idx+1] = g;
+                                    voxelData[idx+2] = b;
+                                    voxelData[idx+3] = a;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Free CPU memory
+                    prim.cpuPositions = undefined;
+                    prim.cpuIndices = undefined;
+                }
+            }
+            for (let child of node.children) {
+                nodes.push(child);
+            }
+        }
+        
+        console.log("CPU Voxelization Complete.");
+        
+        this.voxelGrid = device.createTexture({
+            label: "World Space Voxel Grid",
+            size: [size, size, size],
+            format: 'rgba8unorm',
+            dimension: '3d',
+            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+        });
+        
+        device.queue.writeTexture(
+            { texture: this.voxelGrid },
+            voxelData,
+            { bytesPerRow: size * 4, rowsPerImage: size },
+            [size, size, size]
+        );
+        
+        this.voxelGridView = this.voxelGrid.createView({ dimension: '3d' });
     }
 
     iterate(nodeFunction: (node: Node) => void, materialFunction: (material: Material) => void,

@@ -172,6 +172,9 @@ const ddgiFolder = gui.addFolder('DDGI');
 ddgiFolder.add(stage.ddgi, 'enabled').name('Enabled').onChange(() => {
     stage.ddgi.updateUniforms();
 });
+ddgiFolder.add(stage.ddgi, 'ssgiEnabled').name('Hybrid SSGI').onChange(() => {
+    stage.ddgi.updateUniforms();
+});
 ddgiFolder.add(stage.ddgi, 'irradianceHysteresis', 0.0, 0.999).step(0.001).name('Irr Hysteresis').onChange(() => {
     stage.ddgi.updateUniforms();
 });

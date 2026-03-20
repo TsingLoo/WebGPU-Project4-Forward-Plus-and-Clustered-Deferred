@@ -291,6 +291,21 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                     binding: 19,
                     visibility: GPUShaderStage.FRAGMENT,
                     buffer: { type: "uniform" }
+                },
+                {   // GBuffer Position
+                    binding: 20,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: { sampleType: "unfilterable-float" }
+                },
+                {   // GBuffer Normal
+                    binding: 21,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: { sampleType: "unfilterable-float" }
+                },
+                {   // GBuffer Albedo
+                    binding: 22,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: { sampleType: "unfilterable-float" }
                 }
             ]
         });
@@ -566,6 +581,9 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                 // NRC bindings
                 { binding: 18, resource: this.nrc.getInferenceView() },
                 { binding: 19, resource: { buffer: this.nrc.nrcUniformBuffer } },
+                { binding: 20, resource: this.gBufferPositionTextureView },
+                { binding: 21, resource: this.gBufferNormalTextureView },
+                { binding: 22, resource: this.gBufferAlbedoTextureView },
             ]
         });
     }
@@ -631,15 +649,16 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         });
         gBufferPass.end();
 
-        // DDGI update (uses G-buffer for screen-space probe tracing)
-        // Pass VSM physical atlas for shadow sampling in probes
-        this.ddgi.update(encoder, {
-            depth: this.depthTextureView,
-            normal: this.gBufferNormalTextureView,
-            albedo: this.gBufferAlbedoTextureView,
-            position: this.gBufferPositionTextureView,
-        }, this.stage.sunLightBuffer, this.vsm.physicalAtlasView, this.vsm.vsmUniformBuffer);
-
+        // Run DDGI update passes
+        if (this.stage.ddgi.enabled) {
+            this.stage.ddgi.update(
+                encoder,
+                this.stage.scene.voxelGridView,
+                this.stage.sunLightBuffer,
+                this.vsm.physicalAtlasView,
+                this.vsm.vsmUniformBuffer
+            );
+        }
         // NRC update (uses same G-buffer data)
         this.nrc.update(encoder, {
             depth: this.depthTextureView,

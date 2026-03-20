@@ -620,14 +620,16 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
         );
         cullingComputePass.end();
 
-        // DDGI update (after geometry, before shading)
-        this.ddgi.update(encoder, {
-            depth: this.depthTextureView,
-            normal: this.geometryNormalDeviceTextureView,
-            albedo: this.geometryAlbedoDeviceTextureView,
-            position: this.geometryPositionDeviceTextureView,
-        }, this.stage.sunLightBuffer, this.stage.vsm.physicalAtlasView, this.stage.vsm.vsmUniformBuffer);
-
+        // Run DDGI update passes
+        if (this.stage.ddgi.enabled) {
+            this.stage.ddgi.update(
+                encoder,
+                this.stage.scene.voxelGridView,
+                this.stage.sunLightBuffer,
+                this.stage.vsm.physicalAtlasView,
+                this.stage.vsm.vsmUniformBuffer
+            );
+        }
         // NRC update
         this.stage.nrc.update(encoder, {
             depth: this.depthTextureView,

@@ -37,6 +37,7 @@ export class DDGI {
     normalBias = 0.25;
     viewBias = 0.1;
     probeTraceAmbient = 0.3;
+    ssgiEnabled = true;
 
     enabled = true;
     debugMode = 0; // 0=off, 1=irradiance, 2=visibility
@@ -269,7 +270,7 @@ export class DDGI {
         f32View[28] = this.enabled ? 1.0 : 0.0;
         f32View[29] = this.debugMode;
         f32View[30] = this.probeTraceAmbient;
-        f32View[31] = 0;
+        f32View[31] = this.ssgiEnabled ? 1.0 : 0.0;
 
         device.queue.writeBuffer(this.ddgiUniformBuffer, 0, data);
     }
@@ -308,16 +309,13 @@ export class DDGI {
                 { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },    // camera
                 { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },    // ddgi uniforms
                 { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },    // random rotation
-                { binding: 3, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'depth' } }, // depth
-                { binding: 4, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float' } }, // normal
-                { binding: 5, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } }, // albedo
-                { binding: 6, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float' } }, // position
-                { binding: 7, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float', viewDimension: 'cube' } }, // env map
-                { binding: 8, visibility: GPUShaderStage.COMPUTE, sampler: {} },                     // env sampler
-                { binding: 9, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },     // ray data
-                { binding: 10, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },    // sun light
-                { binding: 11, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'depth' } }, // VSM physical atlas
-                { binding: 12, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },     // VSM uniforms
+                { binding: 3, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float', viewDimension: '3d' } }, // voxelGrid
+                { binding: 4, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float', viewDimension: 'cube' } }, // env map
+                { binding: 5, visibility: GPUShaderStage.COMPUTE, sampler: {} },                     // env sampler
+                { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },     // ray data
+                { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },    // sun light
+                { binding: 8, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'depth' } }, // VSM physical atlas
+                { binding: 9, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },     // VSM uniforms
             ]
         });
     }
@@ -364,12 +362,7 @@ export class DDGI {
      */
     update(
         encoder: GPUCommandEncoder,
-        gBuffer: {
-            depth: GPUTextureView,
-            normal: GPUTextureView,
-            albedo: GPUTextureView,
-            position: GPUTextureView,
-        },
+        voxelGridView: GPUTextureView,
         sunLightBuffer: GPUBuffer,
         shadowMapView: GPUTextureView,
         vsmUniformBuffer: GPUBuffer,
@@ -392,16 +385,13 @@ export class DDGI {
                 { binding: 0, resource: { buffer: this.camera.uniformsBuffer } },
                 { binding: 1, resource: { buffer: this.ddgiUniformBuffer } },
                 { binding: 2, resource: { buffer: this.randomRotationBuffer } },
-                { binding: 3, resource: gBuffer.depth },
-                { binding: 4, resource: gBuffer.normal },
-                { binding: 5, resource: gBuffer.albedo },
-                { binding: 6, resource: gBuffer.position },
-                { binding: 7, resource: this.environment.envCubemapView },
-                { binding: 8, resource: this.environment.envSampler },
-                { binding: 9, resource: { buffer: this.rayDataBuffer } },
-                { binding: 10, resource: { buffer: sunLightBuffer } },
-                { binding: 11, resource: shadowMapView },
-                { binding: 12, resource: { buffer: vsmUniformBuffer } },
+                { binding: 3, resource: voxelGridView },
+                { binding: 4, resource: this.environment.envCubemapView },
+                { binding: 5, resource: this.environment.envSampler },
+                { binding: 6, resource: { buffer: this.rayDataBuffer } },
+                { binding: 7, resource: { buffer: sunLightBuffer } },
+                { binding: 8, resource: shadowMapView },
+                { binding: 9, resource: { buffer: vsmUniformBuffer } },
             ]
         });
 
