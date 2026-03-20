@@ -2,6 +2,7 @@ import * as renderer from '../renderer';
 import * as shaders from '../shaders/shaders';
 import { Stage } from '../stage/stage';
 import { DDGI } from '../stage/ddgi';
+import { NRC } from '../stage/nrc';
 import { VSM } from '../stage/vsm';
 
 export class ForwardPlusRenderer extends renderer.Renderer {
@@ -42,6 +43,7 @@ export class ForwardPlusRenderer extends renderer.Renderer {
     geometryPipeline: GPURenderPipeline;
 
     ddgi: DDGI;
+    nrc: NRC;
     vsm: VSM;
     private stageEnv: import('../stage/environment').Environment;
     private stage: import('../stage/stage').Stage;
@@ -124,6 +126,7 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         const env = stage.environment;
         this.stageEnv = env;
         this.ddgi = stage.ddgi;
+        this.nrc = stage.nrc;
         this.vsm = stage.vsm;
         this.stage = stage;
 
@@ -255,6 +258,16 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                 },
                 {   // VSM Uniforms
                     binding: 17,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    buffer: { type: "uniform" }
+                },
+                {   // NRC Inference Texture
+                    binding: 18,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: { sampleType: "float" }
+                },
+                {   // NRC Uniforms
+                    binding: 19,
                     visibility: GPUShaderStage.FRAGMENT,
                     buffer: { type: "uniform" }
                 }
@@ -443,6 +456,9 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                 { binding: 15, resource: this.vsm.shadowComparisonSampler },
                 { binding: 16, resource: { buffer: this.vsm.pageTableBuffer } },
                 { binding: 17, resource: { buffer: this.vsm.vsmUniformBuffer } },
+                // NRC bindings
+                { binding: 18, resource: this.nrc.getInferenceView() },
+                { binding: 19, resource: { buffer: this.nrc.nrcUniformBuffer } },
             ]
         });
     }
@@ -511,6 +527,14 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         // DDGI update (uses G-buffer for screen-space probe tracing)
         // Pass VSM physical atlas for shadow sampling in probes
         this.ddgi.update(encoder, {
+            depth: this.depthTextureView,
+            normal: this.gBufferNormalTextureView,
+            albedo: this.gBufferAlbedoTextureView,
+            position: this.gBufferPositionTextureView,
+        }, this.stage.sunLightBuffer, this.vsm.physicalAtlasView, this.vsm.vsmUniformBuffer);
+
+        // NRC update (uses same G-buffer data)
+        this.nrc.update(encoder, {
             depth: this.depthTextureView,
             normal: this.gBufferNormalTextureView,
             albedo: this.gBufferAlbedoTextureView,

@@ -32,13 +32,13 @@ export class DDGI {
     gridMax: [number, number, number] = [14, 12, 7];
 
     // Hysteresis
-    irradianceHysteresis = 0.85;
+    irradianceHysteresis = 0.95;
     visibilityHysteresis = 0.97;
     normalBias = 0.25;
     viewBias = 0.1;
     probeTraceAmbient = 0.3;
 
-    enabled = true;
+    enabled = false;
     debugMode = 0; // 0=off, 1=irradiance, 2=visibility
 
     // GPU resources

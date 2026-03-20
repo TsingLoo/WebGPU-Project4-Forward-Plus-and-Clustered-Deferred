@@ -122,7 +122,9 @@ safeOptions.sort((a, b) => a - b);
 
 // Toggle: saves/restores numLights
 let savedNumLights = lights.numLights;
-const pointLightToggle = { enabled: true };
+const pointLightToggle = { enabled: false };
+lights.numLights = 0;
+lights.updateLightSetUniformNumLights();
 
 const lightNumSlider = lightsFolder.add(lights, 'numLights').min(1).max(Lights.maxNumLights).step(1).name('Count').onChange(() => {
     if (pointLightToggle.enabled) savedNumLights = lights.numLights;
@@ -199,6 +201,7 @@ const updateGridBounds = () => {
     stage.ddgi.gridMin = [gridProxy.minX, gridProxy.minY, gridProxy.minZ];
     stage.ddgi.gridMax = [gridProxy.maxX, gridProxy.maxY, gridProxy.maxZ];
     stage.ddgi.updateUniforms();
+    stage.nrc.setSceneBounds(stage.ddgi.gridMin as [number, number, number], stage.ddgi.gridMax as [number, number, number]);
 };
 gridBoundsFolder.add(gridProxy, 'minX', -30, 0).step(0.5).name('Min X').onChange(updateGridBounds);
 gridBoundsFolder.add(gridProxy, 'minY', -5, 5).step(0.5).name('Min Y').onChange(updateGridBounds);
@@ -208,6 +211,30 @@ gridBoundsFolder.add(gridProxy, 'maxY', 3, 20).step(0.5).name('Max Y').onChange(
 gridBoundsFolder.add(gridProxy, 'maxZ', 0, 20).step(0.5).name('Max Z').onChange(updateGridBounds);
 
 ddgiFolder.open();
+
+// =========== NRC (Neural Radiance Caching) ===========
+const nrcFolder = gui.addFolder('NRC (Neural Radiance Cache)');
+nrcFolder.add(stage.nrc, 'enabled').name('Enabled').onChange((val: boolean) => {
+    if (val) {
+        // Mutual exclusion: disable DDGI when NRC is enabled
+        stage.ddgi.enabled = false;
+        stage.ddgi.updateUniforms();
+    }
+    stage.nrc.updateUniforms();
+});
+nrcFolder.add(stage.nrc, 'learningRate', 0.0001, 0.1).step(0.0001).name('Learning Rate').onChange(() => {
+    stage.nrc.updateUniforms();
+});
+nrcFolder.add(stage.nrc, 'momentum', 0.0, 0.99).step(0.01).name('Momentum').onChange(() => {
+    stage.nrc.updateUniforms();
+});
+nrcFolder.add(stage.nrc, 'sampleStride', [2, 4, 8, 16]).name('Sample Stride').onChange(() => {
+    stage.nrc.updateUniforms();
+});
+nrcFolder.add(stage.nrc, 'debugMode', { 'Off': 0, 'Raw Inference': 1, 'HDR Mapped': 2 }).name('Debug View').onChange(() => {
+    stage.nrc.updateUniforms();
+});
+nrcFolder.open();
 
 // =========== Helper functions (HDR / EXR parsing) ===========
 function parseHdrFile(buffer: ArrayBuffer): { rgbaData: Float32Array, width: number, height: number } {

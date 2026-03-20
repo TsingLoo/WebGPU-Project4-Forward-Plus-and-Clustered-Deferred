@@ -3,6 +3,7 @@ import { Camera } from "./camera";
 import { DDGI } from "./ddgi";
 import { Environment } from "./environment";
 import { Lights } from "./lights";
+import { NRC } from "./nrc";
 import { Scene } from "./scene";
 import { VSM } from "./vsm";
 
@@ -13,6 +14,7 @@ export class Stage {
     stats: Stats;
     environment: Environment;
     ddgi: DDGI;
+    nrc: NRC;
     vsm: VSM;
 
     // Sun light
@@ -29,6 +31,7 @@ export class Stage {
         this.stats = stats;
         this.environment = environment;
         this.ddgi = new DDGI(camera, environment);
+        this.nrc = new NRC(camera, environment);
         this.vsm = new VSM(camera);
 
         // Sync sun direction into VSM

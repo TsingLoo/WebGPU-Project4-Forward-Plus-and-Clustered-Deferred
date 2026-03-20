@@ -35,6 +35,12 @@ import ddgiIrradianceUpdateRaw from './ddgi_irradiance_update.cs.wgsl?raw';
 import ddgiVisibilityUpdateRaw from './ddgi_visibility_update.cs.wgsl?raw';
 import ddgiBorderUpdateRaw from './ddgi_border_update.cs.wgsl?raw';
 
+// NRC shaders
+import nrcCommonRaw from './nrc_common.wgsl?raw';
+import nrcScatterTrainingRaw from './nrc_scatter_training.cs.wgsl?raw';
+import nrcTrainRaw from './nrc_train.cs.wgsl?raw';
+import nrcInferenceRaw from './nrc_inference.cs.wgsl?raw';
+
 // Shadow shaders
 import shadowVertRaw from './shadow.vs.wgsl?raw';
 import shadowFragRaw from './shadow.fs.wgsl?raw';
@@ -91,6 +97,9 @@ export const constants = {
     vsmPhysPagesPerAxis: 32,
     vsmNumClipmapLevels: 6,
     vsmPagesPerLevelAxis: 128,
+
+    // NRC
+    nrcMaxTrainingSamples: 4096,
 };
 
 // =================================
@@ -113,7 +122,8 @@ function evalShaderRaw(raw: string) {
 
     .replace(/\$\{ddgiRaysPerProbe\}/g, constants.ddgiRaysPerProbe.toString())
     .replace(/\$\{ddgiIrradianceTexels\}/g, constants.ddgiIrradianceTexels.toString())
-    .replace(/\$\{ddgiVisibilityTexels\}/g, constants.ddgiVisibilityTexels.toString());
+    .replace(/\$\{ddgiVisibilityTexels\}/g, constants.ddgiVisibilityTexels.toString())
+    .replace(/\$\{nrcMaxTrainingSamples\}/g, constants.nrcMaxTrainingSamples.toString());
 }
 
 const commonSrc: string = evalShaderRaw(commonRaw);
@@ -165,3 +175,12 @@ export const shadowFragSrc: string = shadowFragRaw;
 export const vsmClearSrc: string = processShaderRaw(vsmClearRaw);
 export const vsmMarkPagesSrc: string = processShaderRaw(vsmMarkPagesRaw);
 export const vsmAllocatePagesSrc: string = processShaderRaw(vsmAllocatePagesRaw);
+
+// NRC shaders (need common + nrc_common for structs/utilities)
+const nrcCommonSrc: string = evalShaderRaw(nrcCommonRaw);
+function processNrcShaderRaw(raw: string) {
+    return commonSrc + nrcCommonSrc + evalShaderRaw(raw);
+}
+export const nrcScatterTrainingSrc: string = processNrcShaderRaw(nrcScatterTrainingRaw);
+export const nrcTrainSrc: string = processNrcShaderRaw(nrcTrainRaw);
+export const nrcInferenceSrc: string = processNrcShaderRaw(nrcInferenceRaw);
