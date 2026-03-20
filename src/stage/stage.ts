@@ -24,7 +24,7 @@ export class Stage {
     sunDirection: [number, number, number] = [-0.17, 0.27, 0.05]; // direction TO light
     sunColor: [number, number, number] = [1.0, 0.95, 0.85];   // warm white
     sunIntensity: number = 10.0;
-    sunVolumetricEnabled: boolean = true;
+    sunVolumetricEnabled: boolean = false;
     sunVolumetricIntensity: number = 0.001;
     sunVolumetricHeightFalloff: number = 0.66;
     sunVolumetricHeightScale: number = 2.0;

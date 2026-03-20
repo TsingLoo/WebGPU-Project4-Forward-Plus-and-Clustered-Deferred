@@ -30,7 +30,7 @@ fn findMissing(@builtin(global_invocation_id) global_id: vec3u) {
     let dim = textureDimensions(gbufferDepth);
     if (global_id.x >= dim.x || global_id.y >= dim.y) { return; }
     
-    if ((global_id.x % 64u != 0u) || (global_id.y % 64u != 0u)) { return; } // Very sparse spawn
+    if ((global_id.x % 32u != 0u) || (global_id.y % 32u != 0u)) { return; } // Denser spawn
     
     let fragcoordi = vec2i(global_id.xy);
     let depth = textureLoad(gbufferDepth, fragcoordi, 0);
@@ -45,14 +45,14 @@ fn findMissing(@builtin(global_invocation_id) global_id: vec3u) {
     if (cidx >= 0) {
         let count = gridOffsets[u32(cidx) + 1u] - gridOffsets[u32(cidx)];
         let newly_spawned = atomicAdd(&spawnCounters[u32(cidx)].count, 1u);
-        // If this cell already has 2 surfels (including just spawned by sibling threads), abort!
-        if (count + newly_spawned >= 2u) { return; }
+        // If this cell already has 4 surfels (including just spawned by sibling threads), abort!
+        if (count + newly_spawned >= 4u) { return; }
     }
     
     let s_idx = atomicAdd(&surfelAllocator.count, 1u) % constants.maxSurfels;
     surfels[s_idx].position = world_pos;
     surfels[s_idx].normal = normalize(normal);
-    surfels[s_idx].radius = 2.0; 
+    surfels[s_idx].radius = 1.2; 
     surfels[s_idx].age = 1.0;
     surfels[s_idx].irradiance = vec3f(0.0);
     surfels[s_idx].variance = 1.0;

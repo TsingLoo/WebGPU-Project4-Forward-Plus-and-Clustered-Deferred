@@ -39,7 +39,7 @@ export class DDGI {
     probeTraceAmbient = 0.3;
     ssgiEnabled = true;
 
-    enabled = true;
+    enabled = false;
     debugMode = 0; // 0=off, 1=irradiance, 2=visibility
 
     // GPU resources

@@ -53,10 +53,10 @@ fn integratorMain(@builtin(global_invocation_id) global_id: vec3u) {
     if (idx >= constants.maxSurfels) { return; }
     
     let time_ms = bitcast<u32>(randoms.y); 
-    let frame_idx = time_ms % 4u;
+    let frame_idx = time_ms % 2u;
     
-    // Time slicing: only evaluate a quarter of surfels per frame
-    if ((idx % 4u) != frame_idx) { return; }
+    // Time slicing: only evaluate half of surfels per frame
+    if ((idx % 2u) != frame_idx) { return; }
     
     let surfel = surfels[idx];
     if (surfel.age == 0.0) { return; }

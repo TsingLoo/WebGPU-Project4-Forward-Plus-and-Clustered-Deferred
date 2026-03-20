@@ -4,11 +4,11 @@ import { Camera } from './camera';
 import { Scene } from './scene';
 
 export class SurfelGI {
-    enabled = true; // Turn back on to test if it renders!
+    enabled = false; // Disabled by default to avoid conflict with DDGI
     debugMode = false;
     
     // Limits
-    static readonly MAX_SURFELS = 8192;
+    static readonly MAX_SURFELS = 65536;
     static readonly GRID_CELLS_X = 16;
     static readonly GRID_CELLS_Y = 16;
     static readonly GRID_CELLS_Z = 16;

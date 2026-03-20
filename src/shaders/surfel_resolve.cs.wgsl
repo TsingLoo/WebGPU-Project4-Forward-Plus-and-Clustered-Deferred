@@ -62,7 +62,7 @@ fn resolveMain(@builtin(global_invocation_id) global_id: vec3u) {
                         
                         let dist = distance(surfel.position, pos_world);
                         let normalWeight = max(dot(surfel.normal, nor_world), 0.0);
-                        let powerNormal = pow(normalWeight, 2.0); // smooth falloff
+                        let powerNormal = pow(normalWeight, 8.0); // Tighter normal falloff
                         
                         // Basic weighting: distance (gaussian-like) * orientation * age
                         if (dist < surfel.radius && normalWeight > 0.0) {
@@ -82,7 +82,10 @@ fn resolveMain(@builtin(global_invocation_id) global_id: vec3u) {
         }
         
         if (totalWeight > 0.0) {
-            resolvedColor = totalIrradiance / totalWeight;
+            // Smooth fade out at the edges instead of hard cutoff
+            // Use max(totalWeight, 1.0) to prevent multiplying back up to full intensity
+            // when coverage is low
+            resolvedColor = totalIrradiance / max(totalWeight, 1.0);
         }
     }
     
