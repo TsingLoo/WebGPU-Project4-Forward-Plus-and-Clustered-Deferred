@@ -20,10 +20,11 @@
 // NRC bindings
 @group(${bindGroup_scene}) @binding(18) var nrcInferenceTex: texture_2d<f32>;
 @group(${bindGroup_scene}) @binding(19) var<uniform> nrcParams: NRCUniforms;
-// G-buffer bindings for SSRT
 @group(${bindGroup_scene}) @binding(20) var gBufferPosition: texture_2d<f32>;
 @group(${bindGroup_scene}) @binding(21) var gBufferNormal: texture_2d<f32>;
 @group(${bindGroup_scene}) @binding(22) var gBufferAlbedo: texture_2d<f32>;
+@group(${bindGroup_scene}) @binding(23) var surfelIrradianceTex: texture_2d<f32>;
+@group(${bindGroup_scene}) @binding(24) var<uniform> surfelParams: vec4f;
 
 @group(${bindGroup_material}) @binding(0) var diffuseTex: texture_2d<f32>;
 @group(${bindGroup_material}) @binding(1) var diffuseTexSampler: sampler;
@@ -348,8 +349,35 @@ fn main(in: FragmentInput) -> @location(0) vec4f
         let nrcBounce = nrcIrradiance * albedo;
         let iblFloor2 = iblIrradiance * albedo * 0.15;
         diffuseAmbient = max(nrcBounce, iblFloor2);
+    } else if (surfelParams.x > 0.5) {
+        // Surfel GI mode
+        let surfelTexSize = textureDimensions(surfelIrradianceTex);
+        let screenUV = in.fragcoord.xy / vec2f(f32(clusterSet.screen_width), f32(clusterSet.screen_height));
+        let surfelCoord = vec2i(i32(screenUV.x * f32(surfelTexSize.x)), i32(screenUV.y * f32(surfelTexSize.y)));
+        
+        var surfelIrradiance = textureLoad(surfelIrradianceTex, surfelCoord, 0).rgb;
+        
+        // Filter out NaNs mathematically since they obliterate the framebuffer
+        if (surfelIrradiance.x != surfelIrradiance.x || surfelIrradiance.y != surfelIrradiance.y || surfelIrradiance.z != surfelIrradiance.z || 
+            !(surfelIrradiance.x >= 0.0 && surfelIrradiance.x <= 100000.0) ||
+            !(surfelIrradiance.y >= 0.0 && surfelIrradiance.y <= 100000.0) ||
+            !(surfelIrradiance.z >= 0.0 && surfelIrradiance.z <= 100000.0)) {
+            surfelIrradiance = vec3f(0.0);
+        }
+        
+        if (surfelParams.z > 0.5) {
+            // DEBUG MODE: Return irradiance directly
+            if (length(surfelIrradiance) > 0.001) {
+                return vec4f(surfelIrradiance * 1.5, 1.0);
+            } else {
+                return vec4f(0.0, 0.0, 0.0, 1.0);
+            }
+        }
+        
+        let surfelBounce = surfelIrradiance * albedo * surfelParams.y; // apply intensity
+        diffuseAmbient = surfelBounce; // Completely replace IBL ambient to clearly see the real GI
     } else {
-        // No DDGI: use IBL irradiance with moderate scaling
+        // No DDGI/NRC/Surfel: use IBL irradiance with moderate scaling
         diffuseAmbient = iblIrradiance * albedo * 1.0;
     }
 
@@ -472,6 +500,14 @@ fn main(in: FragmentInput) -> @location(0) vec4f
     let ambient = (kD * diffuseAmbient + specularIBL * specIBLScale) * ao;
 
     let finalColor = ambient + Lo;
+
+    // Detect NaN: x != x is true if x is NaN
+    if (finalColor.x != finalColor.x || finalColor.y != finalColor.y || finalColor.z != finalColor.z) {
+        return vec4f(1.0, 0.0, 0.0, 1.0);
+    }
+    if (ambient.x != ambient.x || ambient.y != ambient.y || ambient.z != ambient.z) {
+        return vec4f(1.0, 1.0, 0.0, 1.0); // Yellow if ambient alone is NaN
+    }
 
     // Tone mapping (Reinhard)
     let mapped = finalColor / (finalColor + vec3f(1.0));

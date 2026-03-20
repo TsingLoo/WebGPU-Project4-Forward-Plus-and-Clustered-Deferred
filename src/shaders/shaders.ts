@@ -1,7 +1,5 @@
 // CHECKITOUT: this file loads all the shaders and preprocesses them with some common code
 
-import { Camera } from '../stage/camera';
-
 import commonRaw from './common.wgsl?raw';
 
 import naiveVertRaw from './naive.vs.wgsl?raw';
@@ -40,6 +38,14 @@ import nrcCommonRaw from './nrc_common.wgsl?raw';
 import nrcScatterTrainingRaw from './nrc_scatter_training.cs.wgsl?raw';
 import nrcTrainRaw from './nrc_train.cs.wgsl?raw';
 import nrcInferenceRaw from './nrc_inference.cs.wgsl?raw';
+
+// Surfel shaders
+import surfelCommonRaw from './surfel_common.wgsl?raw';
+import bvhRaw from './bvh.wgsl?raw';
+import surfelLifecycleRaw from './surfel_lifecycle.cs.wgsl?raw';
+import surfelGridRaw from './surfel_grid.cs.wgsl?raw';
+import surfelIntegratorRaw from './surfel_integrator.cs.wgsl?raw';
+import surfelResolveRaw from './surfel_resolve.cs.wgsl?raw';
 
 // Shadow shaders
 import shadowVertRaw from './shadow.vs.wgsl?raw';
@@ -194,3 +200,14 @@ function processNrcShaderRaw(raw: string) {
 export const nrcScatterTrainingSrc: string = processNrcShaderRaw(nrcScatterTrainingRaw);
 export const nrcTrainSrc: string = processNrcShaderRaw(nrcTrainRaw);
 export const nrcInferenceSrc: string = processNrcShaderRaw(nrcInferenceRaw);
+
+// Surfel shaders (need common + surfel_common + bvh for structs/utilities)
+const surfelCommonSrc: string = evalShaderRaw(surfelCommonRaw);
+const bvhSrc: string = evalShaderRaw(bvhRaw);
+function processSurfelShaderRaw(raw: string) {
+    return commonSrc + surfelCommonSrc + bvhSrc + evalShaderRaw(raw);
+}
+export const surfelLifecycleSrc: string = processSurfelShaderRaw(surfelLifecycleRaw);
+export const surfelGridSrc: string = processSurfelShaderRaw(surfelGridRaw);
+export const surfelIntegratorSrc: string = processSurfelShaderRaw(surfelIntegratorRaw);
+export const surfelResolveSrc: string = processSurfelShaderRaw(surfelResolveRaw);

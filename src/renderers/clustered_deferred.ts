@@ -26,6 +26,10 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
     globalLightIndicesDeviceBuffer: GPUBuffer;
     zeroDeviceBuffer: GPUBuffer;
     clusterSetDeviceBuffer: GPUBuffer;
+    
+    surfelIrradianceDeviceTexture: GPUTexture;
+    surfelIrradianceDeviceTextureView: GPUTextureView;
+    surfelParamsBuffer: GPUBuffer;
 
     zPrepassPipeline: GPURenderPipeline;
 
@@ -130,6 +134,20 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING
         });
         this.shadingOutputDeviceTextureView = this.shadingOutputDeviceTexture.createView();
+
+        this.surfelIrradianceDeviceTexture = renderer.device.createTexture({
+            label: "surfel irradiance Texture",
+            size: geometryDeviceTextureSize,
+            format: "rgba16float",
+            usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING
+        });
+        this.surfelIrradianceDeviceTextureView = this.surfelIrradianceDeviceTexture.createView();
+        
+        this.surfelParamsBuffer = renderer.device.createBuffer({
+            label: "surfel params buffer",
+            size: 16,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
 
         this.tileOffsetsDeviceBuffer = renderer.device.createBuffer({
             size: shaders.constants.numTotalClustersConfig * 2 * 4,
@@ -257,6 +275,9 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 { binding: 22, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },         // VSM uniforms
                 { binding: 23, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },    // NRC inference output
                 { binding: 24, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },         // NRC uniforms
+                // Surfel GI
+                { binding: 25, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },    // Surfel irradiance
+                { binding: 26, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },         // Surfel params
             ]
         });
 
@@ -355,6 +376,8 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 { binding: 22, resource: { buffer: this.stage.vsm.vsmUniformBuffer } },
                 { binding: 23, resource: this.stage.nrc.getInferenceView() },
                 { binding: 24, resource: { buffer: this.stage.nrc.nrcUniformBuffer } },
+                { binding: 25, resource: this.surfelIrradianceDeviceTextureView },
+                { binding: 26, resource: { buffer: this.surfelParamsBuffer } },
             ]
         });
 
@@ -638,6 +661,29 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
             position: this.geometryPositionDeviceTextureView,
         }, this.stage.sunLightBuffer, this.stage.vsm.physicalAtlasView, this.stage.vsm.vsmUniformBuffer);
 
+        // Surfel update
+        if (this.stage.surfelGI.enabled) {
+            this.stage.surfelGI.update(
+                encoder,
+                this.stage.scene,
+                this.stageEnv.envCubemapView,
+                this.stageEnv.envSampler,
+                this.depthTextureView,
+                this.geometryNormalDeviceTextureView,
+                this.geometryPositionDeviceTextureView,
+                this.surfelIrradianceDeviceTextureView,
+                this.stage.sunLightBuffer,
+                this.stage.vsm.physicalAtlasView,
+                this.stage.vsm.vsmUniformBuffer
+            );
+        }
+        
+        // Write surfelParams (enabled, intensity, 0, 0)
+        renderer.device.queue.writeBuffer(this.surfelParamsBuffer, 0, new Float32Array([
+            this.stage.surfelGI.enabled ? 1.0 : 0.0,
+            1.0, 0.0, 0.0
+        ]));
+
         // Recreate shading bind group to pick up current DDGI atlas (ping-pong)
         this.shadingBindGroup = renderer.device.createBindGroup({
             label: "shading bind group",
@@ -668,6 +714,8 @@ export class ClusteredDeferredRenderer extends renderer.Renderer {
                 { binding: 22, resource: { buffer: this.stage.vsm.vsmUniformBuffer } },
                 { binding: 23, resource: this.stage.nrc.getInferenceView() },
                 { binding: 24, resource: { buffer: this.stage.nrc.nrcUniformBuffer } },
+                { binding: 25, resource: this.surfelIrradianceDeviceTextureView },
+                { binding: 26, resource: { buffer: this.surfelParamsBuffer } },
             ]
         });
 

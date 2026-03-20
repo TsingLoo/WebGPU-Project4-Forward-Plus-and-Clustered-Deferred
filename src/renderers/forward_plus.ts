@@ -49,6 +49,11 @@ export class ForwardPlusRenderer extends renderer.Renderer {
     gBufferPositionTextureView: GPUTextureView;
     gBufferSpecularTexture: GPUTexture;
     gBufferSpecularTextureView: GPUTextureView;
+
+    surfelIrradianceDeviceTexture: GPUTexture;
+    surfelIrradianceDeviceTextureView: GPUTextureView;
+    surfelParamsBuffer: GPUBuffer;
+
     geometryBindGroupLayout: GPUBindGroupLayout;
     geometryBindGroup: GPUBindGroup;
     geometryPipeline: GPURenderPipeline;
@@ -107,6 +112,19 @@ export class ForwardPlusRenderer extends renderer.Renderer {
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
         });
         this.gBufferSpecularTextureView = this.gBufferSpecularTexture.createView();
+
+        this.surfelIrradianceDeviceTexture = renderer.device.createTexture({
+            label: "Forward+ Surfel Irradiance Texture",
+            size: gBufSize, format: 'rgba16float',
+            usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
+        });
+        this.surfelIrradianceDeviceTextureView = this.surfelIrradianceDeviceTexture.createView();
+        
+        this.surfelParamsBuffer = renderer.device.createBuffer({
+            label: "Forward+ Surfel params buffer",
+            size: 16,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
 
         this.tileOffsetsDeviceBuffer = renderer.device.createBuffer({
             size: shaders.constants.numTotalClustersConfig * 2 * 4,
@@ -306,6 +324,16 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                     binding: 22,
                     visibility: GPUShaderStage.FRAGMENT,
                     texture: { sampleType: "unfilterable-float" }
+                },
+                {   // Surfel Irradiance
+                    binding: 23,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    texture: { sampleType: "unfilterable-float" }
+                },
+                {   // Surfel Uniforms
+                    binding: 24,
+                    visibility: GPUShaderStage.FRAGMENT,
+                    buffer: { type: "uniform" }
                 }
             ]
         });
@@ -584,6 +612,8 @@ export class ForwardPlusRenderer extends renderer.Renderer {
                 { binding: 20, resource: this.gBufferPositionTextureView },
                 { binding: 21, resource: this.gBufferNormalTextureView },
                 { binding: 22, resource: this.gBufferAlbedoTextureView },
+                { binding: 23, resource: this.surfelIrradianceDeviceTextureView },
+                { binding: 24, resource: { buffer: this.surfelParamsBuffer } },
             ]
         });
     }
@@ -648,6 +678,29 @@ export class ForwardPlusRenderer extends renderer.Renderer {
             gBufferPass.drawIndexed(primitive.numIndices);
         });
         gBufferPass.end();
+
+        renderer.device.queue.writeBuffer(this.surfelParamsBuffer, 0, new Float32Array([
+            this.stage.surfelGI.enabled ? 1.0 : 0.0,
+            2.0, // GI Intensity multiplier
+            this.stage.surfelGI.debugMode ? 1.0 : 0.0,
+            0.0
+        ]));
+
+        if (this.stage.surfelGI.enabled) {
+            this.stage.surfelGI.update(
+                encoder,
+                this.stage.scene,
+                this.stageEnv.envCubemapView,
+                this.stageEnv.envSampler,
+                this.depthTextureView,
+                this.gBufferNormalTextureView,
+                this.gBufferPositionTextureView,
+                this.surfelIrradianceDeviceTextureView,
+                this.stage.sunLightBuffer,
+                this.stage.vsm.physicalAtlasView,
+                this.stage.vsm.vsmUniformBuffer
+            );
+        }
 
         // Run DDGI update passes
         if (this.stage.ddgi.enabled) {
@@ -739,7 +792,7 @@ export class ForwardPlusRenderer extends renderer.Renderer {
         skyboxPass.end();
 
         // Volumetric Lighting Generation Pass (Half-Res)
-        if (this.stage.sunVolumetricEnabled) {
+        if (false && this.stage.sunVolumetricEnabled) {
             const volumetricPass = encoder.beginRenderPass({
                 label: "Volumetric Lighting Generator Pass",
                 colorAttachments: [

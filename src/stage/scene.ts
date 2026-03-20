@@ -9,6 +9,7 @@ import { registerLoaders, load, parse } from '@loaders.gl/core';
 import { GLTFLoader, GLTFWithBuffers, GLTFMesh, GLTFMeshPrimitive, GLTFMaterial, GLTFSampler } from '@loaders.gl/gltf';
 import { ImageLoader } from '@loaders.gl/images';
 import { Mat4, mat4 } from 'wgpu-matrix';
+import { BVHData, buildBVHFromScene } from './bvh_builder';
 import { device, materialBindGroupLayout, modelBindGroupLayout } from '../renderer';
 
 export function setupLoaders() {
@@ -223,6 +224,7 @@ export class Primitive {
             size: indicesArray.byteLength,
             usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
         });
+        // @ts-ignore
         device.queue.writeBuffer(this.indexBuffer, 0, indicesArray);
 
         this.vertexBuffer = device.createBuffer({
@@ -230,7 +232,8 @@ export class Primitive {
             size: vertsArray.byteLength,
             usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
         });
-        device.queue.writeBuffer(this.vertexBuffer, 0, vertsArray);
+        // @ts-ignore
+        device.queue.writeBuffer(this.vertexBuffer, 0, vertsArray as unknown as Float32Array);
 
         this.numIndices = indicesArray.length;
         
@@ -293,7 +296,7 @@ export class Node {
                 usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
             });
 
-            device.queue.writeBuffer(this.modelMatUniformBuffer, 0, this.transform);
+            device.queue.writeBuffer(this.modelMatUniformBuffer as GPUBuffer, 0, this.transform as any);
 
             this.modelBindGroup = device.createBindGroup({
                 label: "model bind group",
@@ -412,6 +415,9 @@ export class Scene {
     public readonly voxelGridSize = 128; // 128x128x128
     public readonly voxelBoundsMin = [-15, 0, -10];
     public readonly voxelBoundsMax = [15, 15, 10];
+    
+    // BVH for Surfel GI Ray Tracing
+    public bvhData!: BVHData;
 
     constructor() {
         this.root.setName("root");
@@ -546,6 +552,9 @@ export class Scene {
         }
 
         sceneRoot.propagateTransformations();
+        
+        // Phase 1.5: Build BVH for Surfel GI
+        this.bvhData = buildBVHFromScene(this.root);
         
         // Phase 2: Build World-Space Voxel Grid on CPU for Coarse Scene Tracing!
         this.buildVoxelGrid();

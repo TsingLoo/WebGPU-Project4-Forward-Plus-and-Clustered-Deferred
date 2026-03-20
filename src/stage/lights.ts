@@ -35,6 +35,7 @@ export class Lights {
 
     constructor(camera: Camera) {
         this.camera = camera;
+        void this.camera; // prevent warning
 
         this.lightSetStorageBuffer = device.createBuffer({
             label: "lights",
@@ -114,6 +115,7 @@ export class Lights {
     }
 
     doLightClustering(encoder: GPUCommandEncoder) {
+        void encoder;
         // TODO-2: run the light clustering compute pass(es) here
         // implementing clustering here allows for reusing the code in both Forward+ and Clustered Deferred
     }

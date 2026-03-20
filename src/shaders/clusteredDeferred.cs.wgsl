@@ -26,6 +26,10 @@
 @group(${bindGroup_scene}) @binding(23) var nrcInferenceTex: texture_2d<f32>;
 @group(${bindGroup_scene}) @binding(24) var<uniform> nrcParams: NRCUniforms;
 
+// Surfel GI binding
+@group(${bindGroup_scene}) @binding(25) var surfelIrradianceTex: texture_2d<f32>;
+@group(${bindGroup_scene}) @binding(26) var<uniform> surfelParams: vec4f; // .x = enabled, .y = intensity
+
 @compute @workgroup_size(8, 8, 1)
 fn main(
     @builtin(global_invocation_id) global_id: vec3u
@@ -196,8 +200,18 @@ fn main(
         let nrcBounce = nrcIrradiance * albedo;
         let iblFloor2 = iblIrradiance * albedo * 0.15;
         diffuseAmbient = max(nrcBounce, iblFloor2);
+    } else if (surfelParams.x > 0.5) {
+        // Surfel GI mode
+        let surfelTexSize = textureDimensions(surfelIrradianceTex);
+        let screenUV = vec2f(f32(global_id.x) + 0.5, f32(global_id.y) + 0.5) / vec2f(screen_width, screen_height);
+        let surfelCoord = vec2i(i32(screenUV.x * f32(surfelTexSize.x)), i32(screenUV.y * f32(surfelTexSize.y)));
+        
+        let surfelIrradiance = textureLoad(surfelIrradianceTex, surfelCoord, 0).rgb;
+        let surfelBounce = surfelIrradiance * albedo * surfelParams.y; // apply intensity
+        let iblFloor3 = iblIrradiance * albedo * 0.05;
+        diffuseAmbient = max(surfelBounce, iblFloor3);
     } else {
-        // No DDGI: use IBL irradiance with moderate scaling
+        // No DDGI/NRC/Surfel: use IBL irradiance with moderate scaling
         diffuseAmbient = iblIrradiance * albedo * 0.7;
     }
 

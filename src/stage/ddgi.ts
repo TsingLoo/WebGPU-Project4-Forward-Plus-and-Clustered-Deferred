@@ -28,8 +28,8 @@ export class DDGI {
     static readonly VIS_ATLAS_H = (DDGI.GRID_Y * DDGI.GRID_Z) * DDGI.VISIBILITY_WITH_BORDER;
 
     // World-space bounds (Sponza defaults)
-    gridMin: [number, number, number] = [-14, 0, -7];
-    gridMax: [number, number, number] = [14, 12, 7];
+    gridMin: [number, number, number] = [-14, -4, -7];
+    gridMax: [number, number, number] = [14, 16, 7];
 
     // Hysteresis
     irradianceHysteresis = 0.95;

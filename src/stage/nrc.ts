@@ -67,6 +67,7 @@ export class NRC {
         
         // Helper to init a layer
         const initLayer = (fanIn: number, fanOut: number, wSize: number, bSize: number) => {
+            void fanOut; // Prevent unused warning
             const limit = Math.sqrt(6.0 / fanIn);
             // Weights
             for (let i = 0; i < wSize; i++) {

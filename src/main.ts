@@ -13,7 +13,6 @@ import parseHdr from 'parse-hdr';
 // @ts-ignore
 import parseExr from 'parse-exr';
 
-const canvas = document.getElementById('webgpu-canvas') as HTMLCanvasElement;
 import { setupLoaders, Scene } from './stage/scene';
 import { Lights } from './stage/lights';
 import { Camera } from './stage/camera';
@@ -45,7 +44,6 @@ stats.begin = () => {
 
     if (avgStats.collecting) {
         const elapsedTime = (now - avgStats.startTime) / 1000; 
-        const frameTime = now - avgStats.lastFrameTime;
 
         if (elapsedTime < monitorTime) {
             avgStats.frameCount++;
@@ -169,7 +167,11 @@ renderModeController.onChange(setRenderer);
 
 // =========== DDGI ===========
 const ddgiFolder = gui.addFolder('DDGI');
-ddgiFolder.add(stage.ddgi, 'enabled').name('Enabled').onChange(() => {
+ddgiFolder.add(stage.ddgi, 'enabled').name('Enabled').listen().onChange((val: boolean) => {
+    if (val) {
+        stage.surfelGI.enabled = false;
+        // stage.nrc.enabled = false; // commented out in GUI currently
+    }
     stage.ddgi.updateUniforms();
 });
 ddgiFolder.add(stage.ddgi, 'ssgiEnabled').name('Hybrid SSGI').onChange(() => {
@@ -203,6 +205,8 @@ const gridProxy = {
 const updateGridBounds = () => {
     stage.ddgi.gridMin = [gridProxy.minX, gridProxy.minY, gridProxy.minZ];
     stage.ddgi.gridMax = [gridProxy.maxX, gridProxy.maxY, gridProxy.maxZ];
+    stage.surfelGI.gridMin = [gridProxy.minX, gridProxy.minY, gridProxy.minZ];
+    stage.surfelGI.gridMax = [gridProxy.maxX, gridProxy.maxY, gridProxy.maxZ];
     stage.ddgi.updateUniforms();
     stage.nrc.setSceneBounds(stage.ddgi.gridMin as [number, number, number], stage.ddgi.gridMax as [number, number, number]);
 };
@@ -218,28 +222,22 @@ ddgiFolder.open();
 // =========== NRC (Neural Radiance Caching) ===========
 /*
 const nrcFolder = gui.addFolder('NRC (Neural Radiance Cache)');
-nrcFolder.add(stage.nrc, 'enabled').name('Enabled').onChange((val: boolean) => {
-    if (val) {
-        // Mutual exclusion: disable DDGI when NRC is enabled
-        stage.ddgi.enabled = false;
-        stage.ddgi.updateUniforms();
-    }
-    stage.nrc.updateUniforms();
-});
-nrcFolder.add(stage.nrc, 'learningRate', 0.0001, 0.1).step(0.0001).name('Learning Rate').onChange(() => {
-    stage.nrc.updateUniforms();
-});
-nrcFolder.add(stage.nrc, 'momentum', 0.0, 0.99).step(0.01).name('Momentum').onChange(() => {
-    stage.nrc.updateUniforms();
-});
-nrcFolder.add(stage.nrc, 'sampleStride', [2, 4, 8, 16]).name('Sample Stride').onChange(() => {
-    stage.nrc.updateUniforms();
-});
-nrcFolder.add(stage.nrc, 'debugMode', { 'Off': 0, 'Raw Inference': 1, 'HDR Mapped': 2 }).name('Debug View').onChange(() => {
-    stage.nrc.updateUniforms();
-});
-nrcFolder.open();
+// ...
 */
+
+// =========== Surfel GI ===========
+const surfelFolder = gui.addFolder('Surfel GI');
+surfelFolder.add(stage.surfelGI, 'enabled').name('Enabled').listen().onChange((val: boolean) => {
+    if (val) {
+        // Mutual exclusion: disable DDGI and NRC when Surfel is enabled
+        stage.ddgi.enabled = false;
+        stage.nrc.enabled = false;
+        stage.ddgi.updateUniforms();
+        stage.nrc.updateUniforms();
+    }
+});
+surfelFolder.add(stage.surfelGI, 'debugMode').name('Debug Mode').listen();
+surfelFolder.open();
 
 // =========== Helper functions (HDR / EXR parsing) ===========
 function parseHdrFile(buffer: ArrayBuffer): { rgbaData: Float32Array, width: number, height: number } {
