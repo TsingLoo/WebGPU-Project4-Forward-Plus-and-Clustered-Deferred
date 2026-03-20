@@ -75,6 +75,11 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     // Tone map target to [0,1] so sigmoid output can represent it
     // Using Reinhard: x / (x + 1)
     targetRadiance = targetRadiance / (targetRadiance + vec3f(1.0));
+    
+    // Prevent bad samples from poisoning the training buffer
+    if (targetRadiance.x != targetRadiance.x || targetRadiance.y != targetRadiance.y || targetRadiance.z != targetRadiance.z) {
+        targetRadiance = vec3f(0.0);
+    }
 
     // Early out for sky pixels so we don't dilute the training dataset with zeros
     if (depth >= 1.0) {

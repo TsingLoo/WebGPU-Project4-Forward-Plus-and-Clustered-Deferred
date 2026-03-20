@@ -213,6 +213,7 @@ gridBoundsFolder.add(gridProxy, 'maxZ', 0, 20).step(0.5).name('Max Z').onChange(
 ddgiFolder.open();
 
 // =========== NRC (Neural Radiance Caching) ===========
+/*
 const nrcFolder = gui.addFolder('NRC (Neural Radiance Cache)');
 nrcFolder.add(stage.nrc, 'enabled').name('Enabled').onChange((val: boolean) => {
     if (val) {
@@ -235,6 +236,7 @@ nrcFolder.add(stage.nrc, 'debugMode', { 'Off': 0, 'Raw Inference': 1, 'HDR Mappe
     stage.nrc.updateUniforms();
 });
 nrcFolder.open();
+*/
 
 // =========== Helper functions (HDR / EXR parsing) ===========
 function parseHdrFile(buffer: ArrayBuffer): { rgbaData: Float32Array, width: number, height: number } {

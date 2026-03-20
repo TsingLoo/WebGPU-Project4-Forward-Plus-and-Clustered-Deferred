@@ -226,13 +226,20 @@ fn main(
 
     // ---- Step 6: Apply Global Update ----
     // Apply average gradient over the batch + momentum
-    let sampleLR = lr / max(f32(numSamples), 1.0);
     var uIdx = threadIdx;
     while (uIdx < NRC_TOTAL_PARAMS) {
-        let avgGrad = gradAccum[uIdx];
-        let m = momentumDecay * momentum[uIdx] + avgGrad;
+        let avgGrad = gradAccum[uIdx] / max(f32(numSamples), 1.0);
+        
+        // Clip gradient to prevent exploding updates
+        let clippedGrad = clamp(avgGrad, -1.0, 1.0);
+        
+        let m = momentumDecay * momentum[uIdx] + clippedGrad;
         momentum[uIdx] = m;
-        weights[uIdx] -= sampleLR * m;
+        
+        // Update weights and clip them to prevent NaNs or infinite growth
+        let newWeight = weights[uIdx] - lr * m;
+        weights[uIdx] = clamp(newWeight, -100.0, 100.0);
+        
         uIdx += WG_SIZE;
     }
 }

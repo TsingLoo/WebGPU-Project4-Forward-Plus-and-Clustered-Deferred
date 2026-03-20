@@ -45,7 +45,13 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     // Inverse Reinhard to recover HDR: x / (1 - x)
     // We clamp predicted to [0.0, 0.95] to prevent unconstrained oscillations 
     // from blowing up to infinity (0.95 -> HDR 19.0 max).
-    let clampedPred = clamp(predicted, vec3f(0.0), vec3f(0.95));
+    var clampedPred = clamp(predicted, vec3f(0.0), vec3f(0.95));
+    
+    // Guard against NaNs (usually caused by diverging training) that result in colorful artifacts
+    if (clampedPred.x != clampedPred.x || clampedPred.y != clampedPred.y || clampedPred.z != clampedPred.z) {
+        clampedPred = vec3f(0.0);
+    }
+
     let hdrPredicted = clampedPred / max(vec3f(1.0) - clampedPred, vec3f(0.001));
 
     // Write to output texture
